@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  cisco-migration-tool:
+    build: .
+    ports:
+      - "3000:3000"
+    network_mode: "host"  # Allows access to local network resources
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
