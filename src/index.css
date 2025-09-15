@@ -2,41 +2,64 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
+/* Cisco Migration Tool Design System */
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --background: 210 15% 97%;
+    --foreground: 210 10% 15%;
 
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 210 10% 15%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover-foreground: 210 10% 15%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    /* Cisco-inspired primary colors */
+    --primary: 207 90% 54%;
+    --primary-foreground: 0 0% 100%;
+    --primary-hover: 207 90% 48%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 210 8% 96%;
+    --secondary-foreground: 210 10% 25%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted: 210 8% 96%;
+    --muted-foreground: 210 6% 50%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --accent: 210 8% 96%;
+    --accent-foreground: 210 10% 15%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --success: 142 76% 36%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 45 93% 47%;
+    --warning-foreground: 0 0% 100%;
+
+    --border: 210 12% 88%;
+    --input: 210 12% 88%;
+    --ring: 207 90% 54%;
 
     --radius: 0.5rem;
+
+    /* Network status colors */
+    --status-connected: 142 76% 36%;
+    --status-disconnected: 0 72% 51%;
+    --status-pending: 45 93% 47%;
+
+    /* Gradients */
+    --gradient-cisco: linear-gradient(135deg, hsl(207 90% 54%), hsl(207 90% 48%));
+    --gradient-header: linear-gradient(180deg, hsl(210 15% 99%), hsl(210 15% 97%));
+
+    /* Shadows */
+    --shadow-cisco: 0 4px 20px -2px hsl(207 90% 54% / 0.15);
+    --shadow-card: 0 2px 10px -2px hsl(210 10% 15% / 0.1);
+
+    /* Enterprise spacing */
+    --spacing-section: 2rem;
+    --spacing-component: 1rem;
 
     --sidebar-background: 0 0% 98%;
 
