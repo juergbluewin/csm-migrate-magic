@@ -3,6 +3,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ConnectionPanel } from "./migration/ConnectionPanel";
+import { SelectionPanel } from "./migration/SelectionPanel";
 import { LogPanel } from "./migration/LogPanel";
 import { DataPanel } from "./migration/DataPanel";
 import { MigrationPanel } from "./migration/MigrationPanel";
@@ -15,9 +16,10 @@ export interface ConnectionStatus {
 }
 
 export interface CSMConnection {
-  ipAddress: string;
+  url: string;
   username: string;
   password: string;
+  verifyTls: boolean;
 }
 
 export interface FMCConnection {
@@ -51,14 +53,50 @@ export interface AccessList {
   description?: string;
 }
 
+export interface ServiceObject {
+  id: string;
+  name: string;
+  protocol: 'tcp' | 'udp' | 'icmp' | 'any';
+  ports: string;
+  description?: string;
+}
+
 export interface AccessRule {
   id: string;
+  policy: string;
+  position: number;
+  name: string;
+  source: string[];
+  destination: string[];
+  services: string[];
   action: 'permit' | 'deny';
-  protocol: string;
-  source: string;
-  destination: string;
-  port?: string;
+  from_zone?: string;
+  to_zone?: string;
+  disabled: boolean;
+  logging: string;
   description?: string;
+}
+
+export interface ExportSelection {
+  networkObjects: boolean;
+  serviceObjects: boolean;
+  accessLists: boolean;
+  aclSource: 'policy' | 'cli';
+  policyName?: string;
+  deviceGid?: string;
+  deviceIp?: string;
+  cliCommand?: string;
+}
+
+export interface ExportSchema {
+  network_objects: NetworkObject[];
+  service_objects: ServiceObject[];
+  acl_rules: AccessRule[];
+  meta: {
+    source: string;
+    server: string;
+    generated_at: string;
+  };
 }
 
 const CiscoMigrationTool = () => {
@@ -68,9 +106,10 @@ const CiscoMigrationTool = () => {
   });
 
   const [csmConnection, setCsmConnection] = useState<CSMConnection>({
-    ipAddress: '',
+    url: '',
     username: '',
-    password: ''
+    password: '',
+    verifyTls: true
   });
 
   const [fmcConnection, setFmcConnection] = useState<FMCConnection>({
@@ -81,7 +120,18 @@ const CiscoMigrationTool = () => {
 
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [networkObjects, setNetworkObjects] = useState<NetworkObject[]>([]);
+  const [serviceObjects, setServiceObjects] = useState<ServiceObject[]>([]);
   const [accessLists, setAccessLists] = useState<AccessList[]>([]);
+  const [exportSelection, setExportSelection] = useState<ExportSelection>({
+    networkObjects: true,
+    serviceObjects: true,
+    accessLists: true,
+    aclSource: 'policy',
+    policyName: '',
+    deviceGid: '',
+    deviceIp: '',
+    cliCommand: 'show access-list'
+  });
 
   const addLog = (level: LogEntry['level'], message: string, details?: string) => {
     const newLog: LogEntry = {
@@ -96,11 +146,22 @@ const CiscoMigrationTool = () => {
 
   const resetTool = () => {
     setConnectionStatus({ csm: 'disconnected', fmc: 'disconnected' });
-    setCsmConnection({ ipAddress: '', username: '', password: '' });
+    setCsmConnection({ url: '', username: '', password: '', verifyTls: true });
     setFmcConnection({ ipAddress: '', username: '', password: '' });
     setLogs([]);
     setNetworkObjects([]);
+    setServiceObjects([]);
     setAccessLists([]);
+    setExportSelection({
+      networkObjects: true,
+      serviceObjects: true,
+      accessLists: true,
+      aclSource: 'policy',
+      policyName: '',
+      deviceGid: '',
+      deviceIp: '',
+      cliCommand: 'show access-list'
+    });
     addLog('info', 'Tool wurde zurückgesetzt', 'Alle Daten und Verbindungen wurden gelöscht.');
   };
 
@@ -185,10 +246,14 @@ const CiscoMigrationTool = () => {
         </div>
 
         <Tabs defaultValue="connection" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4 lg:grid-cols-4">
+          <TabsList className="grid w-full grid-cols-5 lg:grid-cols-5">
             <TabsTrigger value="connection" className="flex items-center gap-2">
               <Settings className="h-4 w-4" />
               Verbindung
+            </TabsTrigger>
+            <TabsTrigger value="selection" className="flex items-center gap-2">
+              <Shield className="h-4 w-4" />
+              Auswahl
             </TabsTrigger>
             <TabsTrigger value="data" className="flex items-center gap-2">
               <Cpu className="h-4 w-4" />
@@ -216,12 +281,24 @@ const CiscoMigrationTool = () => {
             />
           </TabsContent>
 
+          <TabsContent value="selection" className="space-y-6">
+            <SelectionPanel
+              exportSelection={exportSelection}
+              onSelectionChange={setExportSelection}
+              connectionStatus={connectionStatus}
+              addLog={addLog}
+            />
+          </TabsContent>
+
           <TabsContent value="data" className="space-y-6">
             <DataPanel
               networkObjects={networkObjects}
+              serviceObjects={serviceObjects}
               accessLists={accessLists}
               onNetworkObjectsChange={setNetworkObjects}
+              onServiceObjectsChange={setServiceObjects}
               onAccessListsChange={setAccessLists}
+              exportSelection={exportSelection}
               addLog={addLog}
             />
           </TabsContent>

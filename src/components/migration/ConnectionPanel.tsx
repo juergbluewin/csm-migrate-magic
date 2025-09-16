@@ -30,23 +30,23 @@ export const ConnectionPanel = ({
   const [showFmcPassword, setShowFmcPassword] = useState(false);
 
   const testCSMConnection = async () => {
-    if (!csmConnection.ipAddress || !csmConnection.username || !csmConnection.password) {
+    if (!csmConnection.url || !csmConnection.username || !csmConnection.password) {
       addLog('error', 'CSM Verbindung', 'Bitte alle Felder ausfüllen');
       return;
     }
 
     onStatusChange({ ...connectionStatus, csm: 'connecting' });
-    addLog('info', 'CSM Verbindungstest gestartet', `Verbinde zu ${csmConnection.ipAddress}...`);
+    addLog('info', 'CSM Verbindungstest gestartet', `Verbinde zu ${csmConnection.url}...`);
 
     // Simulate API connection test
     setTimeout(() => {
       const success = Math.random() > 0.3; // 70% success rate for demo
       if (success) {
         onStatusChange({ ...connectionStatus, csm: 'connected' });
-        addLog('success', 'CSM Verbindung erfolgreich', `Verbunden mit Security Manager auf ${csmConnection.ipAddress}`);
+        addLog('success', 'CSM Verbindung erfolgreich', `Verbunden mit Security Manager auf ${csmConnection.url}`);
       } else {
         onStatusChange({ ...connectionStatus, csm: 'error' });
-        addLog('error', 'CSM Verbindung fehlgeschlagen', 'Überprüfen Sie IP-Adresse, Benutzername und Passwort');
+        addLog('error', 'CSM Verbindung fehlgeschlagen', 'Überprüfen Sie URL, Benutzername und Passwort');
       }
     }, 2000);
   };
@@ -126,13 +126,26 @@ export const ConnectionPanel = ({
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="csm-ip">IP-Adresse</Label>
+            <Label htmlFor="csm-url">CSM URL</Label>
             <Input
-              id="csm-ip"
-              placeholder="192.168.1.100"
-              value={csmConnection.ipAddress}
-              onChange={(e) => onCsmConnectionChange({ ...csmConnection, ipAddress: e.target.value })}
+              id="csm-url"
+              placeholder="https://csm.example.local"
+              value={csmConnection.url}
+              onChange={(e) => onCsmConnectionChange({ ...csmConnection, url: e.target.value })}
             />
+          </div>
+          
+          <div className="space-y-2">
+            <Label htmlFor="csm-verify-tls" className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="csm-verify-tls"
+                checked={csmConnection.verifyTls}
+                onChange={(e) => onCsmConnectionChange({ ...csmConnection, verifyTls: e.target.checked })}
+                className="h-4 w-4"
+              />
+              TLS-Zertifikat verifizieren
+            </Label>
           </div>
           
           <div className="space-y-2">
