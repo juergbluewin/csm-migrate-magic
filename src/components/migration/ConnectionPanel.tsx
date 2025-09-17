@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Eye, EyeOff, Shield, Network, Wifi, WifiOff, Loader2 } from "lucide-react";
 import { ConnectionStatus, CSMConnection, FMCConnection, LogEntry } from "../CiscoMigrationTool";
+import { callCloudFunction } from "@/lib/cloudClient";
 
 interface ConnectionPanelProps {
   csmConnection: CSMConnection;
@@ -30,25 +31,32 @@ export const ConnectionPanel = ({
   const [showFmcPassword, setShowFmcPassword] = useState(false);
 
   const testCSMConnection = async () => {
-    if (!csmConnection.url || !csmConnection.username || !csmConnection.password) {
+    if (!csmConnection.ipAddress || !csmConnection.username || !csmConnection.password) {
       addLog('error', 'CSM Verbindung', 'Bitte alle Felder ausfüllen');
       return;
     }
 
-    onStatusChange({ ...connectionStatus, csm: 'connecting' });
-    addLog('info', 'CSM Verbindungstest gestartet', `Verbinde zu ${csmConnection.url}...`);
+    try {
+      onStatusChange({ ...connectionStatus, csm: 'connecting' });
+      addLog('info', 'CSM Verbindungstest gestartet', `Verbinde zu https://${csmConnection.ipAddress}/nbi ...`);
 
-    // Simulate API connection test
-    setTimeout(() => {
-      const success = Math.random() > 0.3; // 70% success rate for demo
-      if (success) {
+      const res = await callCloudFunction('csm-nbi', {
+        action: 'testConnection',
+        ipAddress: csmConnection.ipAddress,
+        verifyTls: csmConnection.verifyTls
+      });
+
+      if (res?.ok) {
         onStatusChange({ ...connectionStatus, csm: 'connected' });
-        addLog('success', 'CSM Verbindung erfolgreich', `Verbunden mit Security Manager auf ${csmConnection.url}`);
+        addLog('success', 'CSM Verbindung erfolgreich', `Verbunden mit https://${csmConnection.ipAddress}/nbi`);
       } else {
         onStatusChange({ ...connectionStatus, csm: 'error' });
-        addLog('error', 'CSM Verbindung fehlgeschlagen', 'Überprüfen Sie URL, Benutzername und Passwort');
+        addLog('error', 'CSM Verbindung fehlgeschlagen', res?.error || 'Login fehlgeschlagen');
       }
-    }, 2000);
+    } catch (e: any) {
+      onStatusChange({ ...connectionStatus, csm: 'error' });
+      addLog('error', 'CSM Verbindung fehlgeschlagen', e?.message || 'Unbekannter Fehler');
+    }
   };
 
   const testFMCConnection = async () => {
@@ -126,12 +134,12 @@ export const ConnectionPanel = ({
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="csm-url">CSM URL</Label>
+            <Label htmlFor="csm-ip">CSM IP-Adresse</Label>
             <Input
-              id="csm-url"
-              placeholder="https://csm.example.local"
-              value={csmConnection.url}
-              onChange={(e) => onCsmConnectionChange({ ...csmConnection, url: e.target.value })}
+              id="csm-ip"
+              placeholder="192.168.1.100"
+              value={csmConnection.ipAddress}
+              onChange={(e) => onCsmConnectionChange({ ...csmConnection, ipAddress: e.target.value })}
             />
           </div>
           
@@ -148,40 +156,8 @@ export const ConnectionPanel = ({
             </Label>
           </div>
           
-          <div className="space-y-2">
-            <Label htmlFor="csm-username">Benutzername</Label>
-            <Input
-              id="csm-username"
-              placeholder="admin"
-              value={csmConnection.username}
-              onChange={(e) => onCsmConnectionChange({ ...csmConnection, username: e.target.value })}
-            />
-          </div>
-          
-          <div className="space-y-2">
-            <Label htmlFor="csm-password">Passwort</Label>
-            <div className="relative">
-              <Input
-                id="csm-password"
-                type={showCsmPassword ? "text" : "password"}
-                placeholder="••••••••"
-                value={csmConnection.password}
-                onChange={(e) => onCsmConnectionChange({ ...csmConnection, password: e.target.value })}
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                onClick={() => setShowCsmPassword(!showCsmPassword)}
-              >
-                {showCsmPassword ? (
-                  <EyeOff className="h-4 w-4" />
-                ) : (
-                  <Eye className="h-4 w-4" />
-                )}
-              </Button>
-            </div>
+          <div className="rounded-md bg-muted/30 p-3 text-sm text-muted-foreground">
+            Zugangsdaten werden sicher im Backend verwaltet. Hier nur die CSM-IP angeben.
           </div>
           
           <Button 

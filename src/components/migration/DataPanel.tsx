@@ -9,9 +9,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Database, Download, Search, Edit, Server, Globe, Shield, Users, Network as NetworkIcon, List, FileText } from "lucide-react";
 import { NetworkObject, ServiceObject, AccessList, AccessRule, LogEntry, ExportSelection, ExportSchema } from "../CiscoMigrationTool";
-
+import { CSMConnection } from "../CiscoMigrationTool";
+import { callCloudFunction } from "@/lib/cloudClient";
+import { Database, Search, Server, List, Shield, FileText } from "lucide-react";
 interface DataPanelProps {
   networkObjects: NetworkObject[];
   serviceObjects: ServiceObject[];
@@ -20,6 +21,7 @@ interface DataPanelProps {
   onServiceObjectsChange: (objects: ServiceObject[]) => void;
   onAccessListsChange: (lists: AccessList[]) => void;
   exportSelection: ExportSelection;
+  csmConnection: CSMConnection;
   addLog: (level: LogEntry['level'], message: string, details?: string) => void;
 }
 
@@ -31,6 +33,7 @@ export const DataPanel = ({
   onServiceObjectsChange,
   onAccessListsChange,
   exportSelection,
+  csmConnection,
   addLog
 }: DataPanelProps) => {
   const [searchTerm, setSearchTerm] = useState("");
@@ -41,56 +44,55 @@ export const DataPanel = ({
   const [isServiceDialogOpen, setIsServiceDialogOpen] = useState(false);
   const [isAccessListDialogOpen, setIsAccessListDialogOpen] = useState(false);
 
+  const [isLoading, setIsLoading] = useState(false);
+
   const loadDataFromCSM = async () => {
-    addLog('info', 'Datenexport gestartet', 'Lade Objekte vom Security Manager...');
-    
-    // Simulate loading based on selection
-    setTimeout(() => {
-      if (exportSelection.networkObjects) {
-        const mockNetworkObjects: NetworkObject[] = [
-          { id: '1', name: 'srv-web01', type: 'host', value: '10.1.2.10', description: 'Web Server', firewall: 'ASA-DMZ' },
-          { id: '2', name: 'net-dmz', type: 'network', value: '172.16.10.0/24', description: 'DMZ Network', firewall: 'ASA-DMZ' }
-        ];
-        onNetworkObjectsChange(mockNetworkObjects);
-        addLog('success', 'Network Objects geladen', `${mockNetworkObjects.length} Objekte importiert`);
+    addLog('info', 'Datenexport gestartet', `Lade Objekte vom CSM ${csmConnection.ipAddress} ...`);
+    setIsLoading(true);
+    try {
+      const res = await callCloudFunction<ExportSchema>('csm-nbi', {
+        action: 'export',
+        ipAddress: csmConnection.ipAddress,
+        verifyTls: csmConnection.verifyTls,
+        selection: exportSelection,
+      });
+
+      const nObjs: NetworkObject[] = (res.network_objects || []).map((n, idx) => ({
+        id: `${n.name || 'net'}-${idx}`,
+        name: n.name,
+        type: (n.kind === 'host' ? 'host' : n.kind === 'subnet' ? 'network' : n.kind === 'range' ? 'range' : 'group'),
+        value: n.value,
+        description: (n as any).description,
+      }));
+      onNetworkObjectsChange(nObjs);
+
+      const sObjs: ServiceObject[] = (res.service_objects || []).map((s, idx) => ({
+        id: `${s.name || 'svc'}-${idx}`,
+        name: s.name,
+        protocol: (s as any).protocol || 'any',
+        ports: (s as any).ports || '',
+        description: (s as any).description,
+      }));
+      onServiceObjectsChange(sObjs);
+
+      if (res.acl_rules && res.acl_rules.length > 0) {
+        const list: AccessList = {
+          id: 'acl-1',
+          name: res.acl_rules[0].policy || 'AccessPolicy',
+          firewall: '',
+          rules: res.acl_rules.map((r, i) => ({ ...r, id: r.id || `rule-${i}` })),
+        };
+        onAccessListsChange([list]);
+      } else {
+        onAccessListsChange([]);
       }
 
-      if (exportSelection.serviceObjects) {
-        const mockServiceObjects: ServiceObject[] = [
-          { id: '1', name: 'tcp-443', protocol: 'tcp', ports: '443', description: 'HTTPS Service' },
-          { id: '2', name: 'web-services', protocol: 'tcp', ports: '80,443', description: 'HTTP and HTTPS' }
-        ];
-        onServiceObjectsChange(mockServiceObjects);
-        addLog('success', 'Service Objects geladen', `${mockServiceObjects.length} Services importiert`);
-      }
-
-      if (exportSelection.accessLists) {
-        const mockAccessLists: AccessList[] = [
-          {
-            id: '1',
-            name: `${exportSelection.policyName || 'default'}-access-list`,
-            firewall: 'ASA-DMZ',
-            description: 'Access list for policy',
-            rules: [{
-              id: '1',
-              policy: exportSelection.policyName || 'default',
-              position: 1,
-              name: 'allow-web',
-              source: ['net-dmz'],
-              destination: ['srv-web01'],
-              services: ['web-services'],
-              action: 'permit',
-              from_zone: 'DMZ',
-              to_zone: 'Inside',
-              disabled: false,
-              logging: 'default'
-            }]
-          }
-        ];
-        onAccessListsChange(mockAccessLists);
-        addLog('success', 'Access Lists geladen', `${mockAccessLists.length} Listen importiert`);
-      }
-    }, 1000);
+      addLog('success', 'Export abgeschlossen', `Netz: ${nObjs.length}, Services: ${sObjs.length}, ACL-Regeln: ${res.acl_rules?.length || 0}`);
+    } catch (e: any) {
+      addLog('error', 'Export fehlgeschlagen', e?.message || 'Unbekannter Fehler');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (

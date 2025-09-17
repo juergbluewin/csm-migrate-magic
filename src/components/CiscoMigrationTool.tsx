@@ -16,7 +16,7 @@ export interface ConnectionStatus {
 }
 
 export interface CSMConnection {
-  url: string;
+  ipAddress: string;
   username: string;
   password: string;
   verifyTls: boolean;
@@ -106,7 +106,7 @@ const CiscoMigrationTool = () => {
   });
 
   const [csmConnection, setCsmConnection] = useState<CSMConnection>({
-    url: '',
+    ipAddress: '',
     username: '',
     password: '',
     verifyTls: true
@@ -146,7 +146,7 @@ const CiscoMigrationTool = () => {
 
   const resetTool = () => {
     setConnectionStatus({ csm: 'disconnected', fmc: 'disconnected' });
-    setCsmConnection({ url: '', username: '', password: '', verifyTls: true });
+    setCsmConnection({ ipAddress: '', username: '', password: '', verifyTls: true });
     setFmcConnection({ ipAddress: '', username: '', password: '' });
     setLogs([]);
     setNetworkObjects([]);
@@ -299,6 +299,7 @@ const CiscoMigrationTool = () => {
               onServiceObjectsChange={setServiceObjects}
               onAccessListsChange={setAccessLists}
               exportSelection={exportSelection}
+              csmConnection={csmConnection}
               addLog={addLog}
             />
           </TabsContent>
