@@ -57,21 +57,21 @@ export const DataPanel = ({
         selection: exportSelection,
       });
 
-      const nObjs: NetworkObject[] = (res.network_objects || []).map((n, idx) => ({
+      const nObjs: NetworkObject[] = (res.network_objects || []).map((n: any, idx) => ({
         id: `${n.name || 'net'}-${idx}`,
         name: n.name,
-        type: (n.kind === 'host' ? 'host' : n.kind === 'subnet' ? 'network' : n.kind === 'range' ? 'range' : 'group'),
+        type: (n.kind === 'host' ? 'host' : n.kind === 'subnet' ? 'network' : n.kind === 'range' ? 'range' : 'group') as NetworkObject['type'],
         value: n.value,
-        description: (n as any).description,
+        description: n.description,
       }));
       onNetworkObjectsChange(nObjs);
 
-      const sObjs: ServiceObject[] = (res.service_objects || []).map((s, idx) => ({
+      const sObjs: ServiceObject[] = (res.service_objects || []).map((s: any, idx) => ({
         id: `${s.name || 'svc'}-${idx}`,
         name: s.name,
-        protocol: (s as any).protocol || 'any',
-        ports: (s as any).ports || '',
-        description: (s as any).description,
+        protocol: s.protocol || 'any',
+        ports: s.ports || '',
+        description: s.description,
       }));
       onServiceObjectsChange(sObjs);
 
