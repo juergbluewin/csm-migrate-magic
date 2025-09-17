@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { NetworkObject, ServiceObject, AccessList, AccessRule, LogEntry, ExportSelection, ExportSchema } from "../CiscoMigrationTool";
 import { CSMConnection } from "../CiscoMigrationTool";
-import { callCloudFunction } from "@/lib/cloudClient";
+
 import { Database, Search, Server, List, Shield, FileText } from "lucide-react";
 interface DataPanelProps {
   networkObjects: NetworkObject[];
@@ -47,17 +47,119 @@ export const DataPanel = ({
   const [isLoading, setIsLoading] = useState(false);
 
   const loadDataFromCSM = async () => {
+    if (!csmConnection.username || !csmConnection.password) {
+      addLog('error', 'CSM Anmeldung erforderlich', 'Bitte zuerst CSM-Zugangsdaten eingeben und Verbindung testen');
+      return;
+    }
+
     addLog('info', 'Datenexport gestartet', `Lade Objekte vom CSM ${csmConnection.ipAddress} ...`);
     setIsLoading(true);
+    
     try {
-      const res = await callCloudFunction<ExportSchema>('csm-nbi', {
-        action: 'export',
+      const { CSMClient, CSMXMLParser } = await import('@/lib/csmClient');
+      const client = new CSMClient();
+      
+      // Login to CSM
+      addLog('info', 'CSM Login', 'Anmeldung am CSM...');
+      const loginSuccess = await client.login({
         ipAddress: csmConnection.ipAddress,
-        verifyTls: csmConnection.verifyTls,
-        selection: exportSelection,
+        username: csmConnection.username,
+        password: csmConnection.password,
+        verifyTls: csmConnection.verifyTls
       });
 
-      const nObjs: NetworkObject[] = (res.network_objects || []).map((n: any, idx) => ({
+      if (!loginSuccess) {
+        addLog('error', 'CSM Login fehlgeschlagen', 'Überprüfen Sie Benutzername und Passwort');
+        setIsLoading(false);
+        return;
+      }
+
+      let allNetworkObjects: any[] = [];
+      let allServiceObjects: any[] = [];
+      let allAccessRules: any[] = [];
+
+      // Load Network Objects
+      if (exportSelection.networkObjects) {
+        addLog('info', 'Network Objects', 'Lade Network Objects...');
+        let offset = 0;
+        let hasMore = true;
+        
+        while (hasMore) {
+          const xmlData = await client.getPolicyObjectsList({
+            policyObjectType: 'NetworkPolicyObject',
+            limit: 100,
+            offset
+          });
+          
+          const objects = CSMXMLParser.parseNetworkObjects(xmlData);
+          allNetworkObjects.push(...objects);
+          
+          // Simple pagination check - if we got less than limit, we're done
+          hasMore = objects.length === 100;
+          offset += 100;
+        }
+        
+        addLog('success', 'Network Objects', `${allNetworkObjects.length} Network Objects geladen`);
+      }
+
+      // Load Service Objects
+      if (exportSelection.serviceObjects) {
+        addLog('info', 'Service Objects', 'Lade Service Objects...');
+        let offset = 0;
+        let hasMore = true;
+        
+        while (hasMore) {
+          const xmlData = await client.getPolicyObjectsList({
+            policyObjectType: 'ServicePolicyObject',
+            limit: 100,
+            offset
+          });
+          
+          const objects = CSMXMLParser.parseServiceObjects(xmlData);
+          allServiceObjects.push(...objects);
+          
+          hasMore = objects.length === 100;
+          offset += 100;
+        }
+        
+        addLog('success', 'Service Objects', `${allServiceObjects.length} Service Objects geladen`);
+      }
+
+      // Load Access Lists/Rules
+      if (exportSelection.accessLists) {
+        addLog('info', 'Access Lists', 'Lade Access Rules...');
+        
+        if (exportSelection.aclSource === 'policy') {
+          // Load from policy
+          const policyName = exportSelection.policyName || exportSelection.deviceGid;
+          if (policyName) {
+            let xmlData: string;
+            if (exportSelection.policyName) {
+              xmlData = await client.getPolicyConfigByName(exportSelection.policyName);
+            } else if (exportSelection.deviceGid) {
+              xmlData = await client.getPolicyConfigByDeviceGID(exportSelection.deviceGid);
+            } else {
+              throw new Error('Policy name or device GID required');
+            }
+            
+            allAccessRules = CSMXMLParser.parseAccessRules(xmlData);
+          }
+        } else if (exportSelection.aclSource === 'cli' && exportSelection.deviceIp && exportSelection.cliCommand) {
+          // Load from CLI
+          const xmlData = await client.execDeviceReadOnlyCLICmds({
+            deviceIP: exportSelection.deviceIp,
+            command: 'show',
+            argument: exportSelection.cliCommand.replace('show ', '')
+          });
+          
+          allAccessRules = CSMXMLParser.parseAccessRules(xmlData);
+        }
+        
+        addLog('success', 'Access Lists', `${allAccessRules.length} Access Rules geladen`);
+      }
+
+      // Convert to internal format
+      const nObjs: NetworkObject[] = allNetworkObjects.map((n: any, idx) => ({
         id: `${n.name || 'net'}-${idx}`,
         name: n.name,
         type: (n.kind === 'host' ? 'host' : n.kind === 'subnet' ? 'network' : n.kind === 'range' ? 'range' : 'group') as NetworkObject['type'],
@@ -66,7 +168,7 @@ export const DataPanel = ({
       }));
       onNetworkObjectsChange(nObjs);
 
-      const sObjs: ServiceObject[] = (res.service_objects || []).map((s: any, idx) => ({
+      const sObjs: ServiceObject[] = allServiceObjects.map((s: any, idx) => ({
         id: `${s.name || 'svc'}-${idx}`,
         name: s.name,
         protocol: s.protocol || 'any',
@@ -75,19 +177,37 @@ export const DataPanel = ({
       }));
       onServiceObjectsChange(sObjs);
 
-      if (res.acl_rules && res.acl_rules.length > 0) {
+      if (allAccessRules.length > 0) {
         const list: AccessList = {
           id: 'acl-1',
-          name: res.acl_rules[0].policy || 'AccessPolicy',
-          firewall: '',
-          rules: res.acl_rules.map((r, i) => ({ ...r, id: r.id || `rule-${i}` })),
+          name: 'Imported ACL',
+          firewall: csmConnection.ipAddress,
+          rules: allAccessRules.map((rule: any, idx: number) => ({
+            id: `${rule.name || `rule-${idx}`}`,
+            policy: rule.policy || 'unknown',
+            position: rule.position || idx + 1,
+            name: rule.name || `rule-${idx}`,
+            source: rule.source || [],
+            destination: rule.destination || [],
+            services: rule.services || [],
+            action: rule.action === 'allow' ? 'permit' : rule.action,
+            from_zone: rule.from_zone,
+            to_zone: rule.to_zone,
+            disabled: rule.disabled || false,
+            logging: rule.logging || 'default',
+            description: rule.description
+          }))
         };
         onAccessListsChange([list]);
       } else {
         onAccessListsChange([]);
       }
 
-      addLog('success', 'Export abgeschlossen', `Netz: ${nObjs.length}, Services: ${sObjs.length}, ACL-Regeln: ${res.acl_rules?.length || 0}`);
+      // Logout from CSM
+      client.logout();
+      
+      addLog('success', 'Datenexport abgeschlossen', 
+        `${nObjs.length} Network Objects, ${sObjs.length} Service Objects${allAccessRules.length ? `, ${allAccessRules.length} ACL Rules` : ''} importiert`);
     } catch (e: any) {
       addLog('error', 'Export fehlgeschlagen', e?.message || 'Unbekannter Fehler');
     } finally {

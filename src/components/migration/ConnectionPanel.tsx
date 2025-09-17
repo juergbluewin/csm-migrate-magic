@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Eye, EyeOff, Shield, Network, Wifi, WifiOff, Loader2 } from "lucide-react";
 import { ConnectionStatus, CSMConnection, FMCConnection, LogEntry } from "../CiscoMigrationTool";
-import { callCloudFunction } from "@/lib/cloudClient";
+
 
 interface ConnectionPanelProps {
   csmConnection: CSMConnection;
@@ -40,22 +40,27 @@ export const ConnectionPanel = ({
       onStatusChange({ ...connectionStatus, csm: 'connecting' });
       addLog('info', 'CSM Verbindungstest gestartet', `Verbinde zu https://${csmConnection.ipAddress}/nbi ...`);
 
-      const res = await callCloudFunction('csm-nbi', {
-        action: 'testConnection',
+      const { CSMClient } = await import('@/lib/csmClient');
+      const client = new CSMClient();
+      
+      const success = await client.login({
         ipAddress: csmConnection.ipAddress,
+        username: csmConnection.username,
+        password: csmConnection.password,
         verifyTls: csmConnection.verifyTls
       });
 
-      if (res?.ok) {
+      if (success) {
         onStatusChange({ ...connectionStatus, csm: 'connected' });
         addLog('success', 'CSM Verbindung erfolgreich', `Verbunden mit https://${csmConnection.ipAddress}/nbi`);
+        client.logout();
       } else {
         onStatusChange({ ...connectionStatus, csm: 'error' });
-        addLog('error', 'CSM Verbindung fehlgeschlagen', res?.error || 'Login fehlgeschlagen');
+        addLog('error', 'CSM Verbindung fehlgeschlagen', 'Login fehlgeschlagen - Benutzername oder Passwort falsch');
       }
     } catch (e: any) {
       onStatusChange({ ...connectionStatus, csm: 'error' });
-      addLog('error', 'CSM Verbindung fehlgeschlagen', e?.message || 'Unbekannter Fehler');
+      addLog('error', 'CSM Verbindung fehlgeschlagen', e?.message || 'Netzwerkfehler - CSM nicht erreichbar');
     }
   };
 
@@ -144,6 +149,42 @@ export const ConnectionPanel = ({
           </div>
           
           <div className="space-y-2">
+            <Label htmlFor="csm-username">Benutzername</Label>
+            <Input
+              id="csm-username"
+              placeholder="admin"
+              value={csmConnection.username}
+              onChange={(e) => onCsmConnectionChange({ ...csmConnection, username: e.target.value })}
+            />
+          </div>
+          
+          <div className="space-y-2">
+            <Label htmlFor="csm-password">Passwort</Label>
+            <div className="relative">
+              <Input
+                id="csm-password"
+                type={showCsmPassword ? "text" : "password"}
+                placeholder="••••••••"
+                value={csmConnection.password}
+                onChange={(e) => onCsmConnectionChange({ ...csmConnection, password: e.target.value })}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                onClick={() => setShowCsmPassword(!showCsmPassword)}
+              >
+                {showCsmPassword ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
+          </div>
+          
+          <div className="space-y-2">
             <Label htmlFor="csm-verify-tls" className="flex items-center gap-2">
               <input
                 type="checkbox"
@@ -154,10 +195,6 @@ export const ConnectionPanel = ({
               />
               TLS-Zertifikat verifizieren
             </Label>
-          </div>
-          
-          <div className="rounded-md bg-muted/30 p-3 text-sm text-muted-foreground">
-            Zugangsdaten werden sicher im Backend verwaltet. Hier nur die CSM-IP angeben.
           </div>
           
           <Button 
