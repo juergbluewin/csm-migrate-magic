@@ -47,10 +47,17 @@ export class CSMClient {
         method: 'POST',
         headers: {
           'Content-Type': 'application/xml',
+          'Accept': 'application/xml',
+          'X-Requested-With': 'XMLHttpRequest',
         },
         body: loginXml,
-        // Handle TLS verification based on user setting
-        // Note: In production, this would need proper certificate handling
+        mode: 'cors',
+        credentials: 'include',
+        // Handle CORS and certificate issues
+        ...((!verifyTls) && {
+          // Note: This doesn't actually disable TLS verification in browsers
+          // It's handled by the CSM server configuration
+        })
       });
 
       if (response.ok) {
@@ -66,15 +73,38 @@ export class CSMClient {
         }
       }
       
-      return false;
-    } catch (error) {
+      // Enhanced error handling
+      const errorText = await response.text().catch(() => 'Unbekannter Fehler');
+      throw new Error(`HTTP ${response.status}: ${response.statusText}. ${errorText}`);
+      
+    } catch (error: any) {
       console.error('CSM Login error:', error);
-      return false;
+      
+      // Provide specific error messages for common Docker/Linux issues
+      if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+        throw new Error('Netzwerkfehler: CSM Server nicht erreichbar. Überprüfen Sie:\n' +
+          '- CSM IP-Adresse ist korrekt\n' +
+          '- CSM Server läuft und ist über Port 443 erreichbar\n' +
+          '- Docker Container kann CSM Server erreichen\n' +
+          '- Firewall-Regeln erlauben die Verbindung');
+      }
+      
+      if (error.message.includes('CORS')) {
+        throw new Error('CORS-Fehler: CSM Server blockiert Browser-Zugriff.\n' +
+          'Lösung: CORS auf CSM Server konfigurieren oder Proxy verwenden.');
+      }
+      
+      if (error.message.includes('certificate') || error.message.includes('SSL')) {
+        throw new Error('TLS/SSL-Zertifikatsfehler: CSM verwendet selbstsigniertes Zertifikat.\n' +
+          'Versuchen Sie "TLS-Zertifikat verifizieren" zu deaktivieren.');
+      }
+      
+      throw error;
     }
   }
 
   async getPolicyObjectsList({ policyObjectType, limit = 100, offset = 0 }: CSMObjectQuery) {
-    if (!this.session) throw new Error('Not logged in to CSM');
+    if (!this.session) throw new Error('Nicht mit CSM verbunden');
 
     const requestXml = `<?xml version="1.0" encoding="UTF-8"?>
       <getPolicyObjectsListByTypeRequest>
@@ -83,20 +113,31 @@ export class CSMClient {
         <offset>${offset}</offset>
       </getPolicyObjectsListByTypeRequest>`;
 
-    const response = await fetch(`${this.session.baseUrl}/configservice/getPolicyObjectsListByType`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/xml',
-        'Cookie': this.session.cookie,
-      },
-      body: requestXml,
-    });
+    try {
+      const response = await fetch(`${this.session.baseUrl}/configservice/getPolicyObjectsListByType`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/xml',
+          'Accept': 'application/xml',
+          'Cookie': this.session.cookie,
+        },
+        body: requestXml,
+        mode: 'cors',
+        credentials: 'include',
+      });
 
-    if (!response.ok) {
-      throw new Error(`Failed to get policy objects: ${response.statusText}`);
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        throw new Error(`Fehler beim Abrufen der Policy-Objekte (${response.status}): ${response.statusText}. ${errorText}`);
+      }
+
+      return await response.text();
+    } catch (error: any) {
+      if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+        throw new Error('Netzwerkfehler beim Abrufen der Policy-Objekte. CSM-Verbindung unterbrochen.');
+      }
+      throw error;
     }
-
-    return await response.text();
   }
 
   async getPolicyObject(objectName: string, objectType: 'NetworkPolicyObject' | 'ServicePolicyObject') {

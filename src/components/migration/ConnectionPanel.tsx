@@ -60,7 +60,17 @@ export const ConnectionPanel = ({
       }
     } catch (e: any) {
       onStatusChange({ ...connectionStatus, csm: 'error' });
-      addLog('error', 'CSM Verbindung fehlgeschlagen', e?.message || 'Netzwerkfehler - CSM nicht erreichbar');
+      const errorMessage = e?.message || 'Unbekannter Netzwerkfehler';
+      addLog('error', 'CSM Verbindung fehlgeschlagen', errorMessage);
+
+      // Log additional debug info for Docker/Linux troubleshooting
+      if (errorMessage.includes('Failed to fetch') || errorMessage.includes('Netzwerkfehler')) {
+        addLog('info', 'Troubleshooting-Tipps für Docker/Linux', 
+          '1. Überprüfen Sie die Docker-Netzwerkkonfiguration\n' +
+          '2. Stellen Sie sicher, dass der CSM-Server von Docker aus erreichbar ist\n' +
+          '3. Verwenden Sie die CSM-Server IP-Adresse im Docker-Netzwerk\n' +
+          '4. Prüfen Sie Firewall-Regeln zwischen Docker und CSM');
+      }
     }
   };
 
