@@ -11,8 +11,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { NetworkObject, ServiceObject, AccessList, AccessRule, LogEntry, ExportSelection, ExportSchema } from "../CiscoMigrationTool";
 import { CSMConnection } from "../CiscoMigrationTool";
+import { ExportConfigDialog } from "./ExportConfigDialog";
+import { ExportResultsPanel } from "./ExportResultsPanel";
+import { CSMExportService, ExportResult, ExportConfig } from "@/lib/csmExportService";
 
-import { Database, Search, Server, List, Shield, FileText } from "lucide-react";
+import { Database, Search, Server, List, Shield, FileText, Settings, Zap } from "lucide-react";
 interface DataPanelProps {
   networkObjects: NetworkObject[];
   serviceObjects: ServiceObject[];
@@ -45,6 +48,31 @@ export const DataPanel = ({
   const [isAccessListDialogOpen, setIsAccessListDialogOpen] = useState(false);
 
   const [isLoading, setIsLoading] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportResult, setExportResult] = useState<ExportResult | null>(null);
+  const [isExportConfigOpen, setIsExportConfigOpen] = useState(false);
+
+  const handleAdvancedExport = async (config: ExportConfig) => {
+    setIsExporting(true);
+    addLog('info', 'Erweiterten Export starten', `Format: ${config.format}, Batch-Größe: ${config.batchSize}`);
+    
+    try {
+      const exportService = new CSMExportService();
+      const result = await exportService.export(config);
+      setExportResult(result);
+      
+      if (result.success) {
+        addLog('success', 'Erweiterter Export abgeschlossen', 
+          `${result.networkObjectsCount + result.serviceObjectsCount + result.accessRulesCount} Objekte exportiert`);
+      } else {
+        addLog('error', 'Export fehlgeschlagen', result.errors.map(e => e.message).join(', '));
+      }
+    } catch (error: any) {
+      addLog('error', 'Export-Fehler', error.message);
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const loadDataFromCSM = async () => {
     if (!csmConnection.username || !csmConnection.password) {
@@ -277,17 +305,28 @@ export const DataPanel = ({
             className="w-full sm:w-80"
           />
         </div>
-        <Button onClick={loadDataFromCSM} className="flex items-center gap-2">
-          <Database className="h-4 w-4" />
-          Daten laden
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={loadDataFromCSM} className="flex items-center gap-2">
+            <Database className="h-4 w-4" />
+            Daten laden
+          </Button>
+          <Button 
+            variant="outline" 
+            onClick={() => setIsExportConfigOpen(true)}
+            className="flex items-center gap-2"
+          >
+            <Settings className="h-4 w-4" />
+            Erweiterten Export
+          </Button>
+        </div>
       </div>
 
       <Tabs defaultValue="network" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="network">Network Objects ({networkObjects.length})</TabsTrigger>
           <TabsTrigger value="services">Service Objects ({serviceObjects.length})</TabsTrigger>
           <TabsTrigger value="acl">Access Lists ({accessLists.length})</TabsTrigger>
+          <TabsTrigger value="export">Export-Ergebnisse</TabsTrigger>
         </TabsList>
 
         <TabsContent value="network">
@@ -384,7 +423,22 @@ export const DataPanel = ({
             </CardContent>
           </Card>
         </TabsContent>
+
+        <TabsContent value="export">
+          <ExportResultsPanel 
+            result={exportResult}
+            isLoading={isExporting}
+          />
+        </TabsContent>
       </Tabs>
+
+      <ExportConfigDialog
+        open={isExportConfigOpen}
+        onOpenChange={setIsExportConfigOpen}
+        exportSelection={exportSelection}
+        csmConnection={csmConnection}
+        onExport={handleAdvancedExport}
+      />
     </div>
   );
 };
