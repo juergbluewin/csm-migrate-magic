@@ -74,6 +74,54 @@ export const ConnectionPanel = ({
     }
   };
 
+  // Erweitertes Troubleshooting für CSM Verbindung
+  const generateCorrelationId = () => Math.random().toString(36).slice(2, 10);
+
+  const runCSMDiagnostics = async () => {
+    const cid = generateCorrelationId();
+    const ip = (csmConnection.ipAddress || '').trim();
+    addLog('info', 'CSM Diagnose gestartet', `Korrelation-ID: ${cid}`);
+
+    if (!ip) {
+      addLog('error', 'Diagnose', 'CSM IP-Adresse fehlt');
+      return;
+    }
+
+    const httpsUrl = `https://${ip}/nbi/`;
+    const httpUrl = `http://${ip}/nbi/`;
+    const timeoutMs = 5000;
+    const results: string[] = [];
+
+    const attempt = async (url: string, label: string) => {
+      try {
+        const controller = new AbortController();
+        const t = setTimeout(() => controller.abort(), timeoutMs);
+        await fetch(url, { method: 'GET', mode: 'no-cors', signal: controller.signal });
+        clearTimeout(t);
+        addLog('success', `Netzwerkcheck (${label})`, `Anfrage an ${url} konnte gesendet werden (no-cors).`);
+        results.push(`${label}: erreichbar (Antwort ggf. durch CORS geblockt)`);
+        return true;
+      } catch (err: any) {
+        const msg = err?.name === 'AbortError' ? `Timeout nach ${timeoutMs}ms` : (err?.message || 'Unbekannter Fehler');
+        addLog('error', `Netzwerkcheck (${label}) fehlgeschlagen`, `${msg}`);
+        results.push(`${label}: FEHLER - ${msg}`);
+        return false;
+      }
+    };
+
+    const httpsOk = await attempt(httpsUrl, 'HTTPS');
+    if (!httpsOk) {
+      await attempt(httpUrl, 'HTTP');
+    }
+
+    addLog('info', 'Diagnose Ergebnis', results.join('\n'));
+    addLog('info', 'Nächste Schritte',
+      '• Zertifikat/CORS prüfen (Browser blockiert Details)\n' +
+      '• Host/IP korrekt? Port 443 offen?\n' +
+      '• Proxy/Firewall zwischen App und CSM\n' +
+      '• Vom Host testen: curl -vk https://<CSM-IP>/nbi/login' );
+  };
+
   const testFMCConnection = async () => {
     if (!fmcConnection.ipAddress || !fmcConnection.username || !fmcConnection.password) {
       addLog('error', 'FMC Verbindung', 'Bitte alle Felder ausfüllen');
@@ -207,17 +255,27 @@ export const ConnectionPanel = ({
             </Label>
           </div>
           
-          <Button 
-            onClick={testCSMConnection}
-            disabled={connectionStatus.csm === 'connecting'}
-            className="w-full"
-            variant={connectionStatus.csm === 'connected' ? 'secondary' : 'default'}
-          >
-            {connectionStatus.csm === 'connecting' && (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            )}
-            {connectionStatus.csm === 'connected' ? 'Verbindung testen' : 'Verbinden'}
-          </Button>
+          <div className="space-y-2">
+            <Button 
+              onClick={testCSMConnection}
+              disabled={connectionStatus.csm === 'connecting'}
+              className="w-full"
+              variant={connectionStatus.csm === 'connected' ? 'secondary' : 'default'}
+            >
+              {connectionStatus.csm === 'connecting' && (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              )}
+              {connectionStatus.csm === 'connected' ? 'Verbindung testen' : 'Verbinden'}
+            </Button>
+            <Button
+              onClick={runCSMDiagnostics}
+              disabled={connectionStatus.csm === 'connecting'}
+              className="w-full"
+              variant="outline"
+            >
+              Diagnose starten
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
