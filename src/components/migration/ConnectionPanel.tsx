@@ -87,39 +87,101 @@ export const ConnectionPanel = ({
       return;
     }
 
+    // Validate IP address format
+    const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$|^[a-zA-Z0-9.-]+$/;
+    if (!ipRegex.test(ip)) {
+      addLog('error', 'IP-Format ungültig', `"${ip}" ist keine gültige IP-Adresse oder Hostname`);
+      return;
+    }
+
+    addLog('info', 'Netzwerk-Analyse', `Prüfe Erreichbarkeit von ${ip}...`);
+
     const httpsUrl = `https://${ip}/nbi/`;
     const httpUrl = `http://${ip}/nbi/`;
-    const timeoutMs = 5000;
+    const loginUrl = `https://${ip}/nbi/login`;
+    const timeoutMs = 8000;
     const results: string[] = [];
+    let totalTests = 0;
+    let failedTests = 0;
 
-    const attempt = async (url: string, label: string) => {
+    const analyzeError = (error: any): string => {
+      if (error?.name === 'AbortError') return 'Timeout - Server antwortet nicht innerhalb von 8 Sekunden';
+      if (error?.message?.includes('Failed to fetch')) return 'Netzwerkfehler - Server nicht erreichbar oder CORS-Problem';
+      if (error?.message?.includes('net::ERR_NAME_NOT_RESOLVED')) return 'DNS-Fehler - Hostname kann nicht aufgelöst werden';
+      if (error?.message?.includes('net::ERR_CONNECTION_REFUSED')) return 'Verbindung verweigert - Port geschlossen oder Service läuft nicht';
+      if (error?.message?.includes('net::ERR_CONNECTION_TIMED_OUT')) return 'Verbindungs-Timeout - Firewall oder Routing-Problem';
+      if (error?.message?.includes('net::ERR_CERT_')) return 'SSL-Zertifikat-Problem';
+      return error?.message || 'Unbekannter Netzwerkfehler';
+    };
+
+    const testEndpoint = async (url: string, label: string, method: string = 'GET') => {
+      totalTests++;
       try {
         const controller = new AbortController();
-        const t = setTimeout(() => controller.abort(), timeoutMs);
-        await fetch(url, { method: 'GET', mode: 'no-cors', signal: controller.signal });
-        clearTimeout(t);
-        addLog('success', `Netzwerkcheck (${label})`, `Anfrage an ${url} konnte gesendet werden (no-cors).`);
-        results.push(`${label}: erreichbar (Antwort ggf. durch CORS geblockt)`);
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        
+        const response = await fetch(url, { 
+          method, 
+          mode: 'no-cors', 
+          signal: controller.signal,
+          headers: method === 'POST' ? { 'Content-Type': 'application/xml' } : {}
+        });
+        
+        clearTimeout(timer);
+        addLog('success', `${label} Test`, `✓ Verbindung zu ${url} erfolgreich (Response durch CORS möglicherweise blockiert)`);
+        results.push(`${label}: ✓ Erreichbar`);
         return true;
-      } catch (err: any) {
-        const msg = err?.name === 'AbortError' ? `Timeout nach ${timeoutMs}ms` : (err?.message || 'Unbekannter Fehler');
-        addLog('error', `Netzwerkcheck (${label}) fehlgeschlagen`, `${msg}`);
-        results.push(`${label}: FEHLER - ${msg}`);
+      } catch (error: any) {
+        failedTests++;
+        const detailedError = analyzeError(error);
+        addLog('error', `${label} Test fehlgeschlagen`, `✗ ${url}\nFehler: ${detailedError}`);
+        results.push(`${label}: ✗ ${detailedError}`);
         return false;
       }
     };
 
-    const httpsOk = await attempt(httpsUrl, 'HTTPS');
-    if (!httpsOk) {
-      await attempt(httpUrl, 'HTTP');
+    // Test verschiedene Endpunkte
+    const httpsOk = await testEndpoint(httpsUrl, 'HTTPS NBI');
+    const httpsLoginOk = await testEndpoint(loginUrl, 'HTTPS Login', 'POST');
+    
+    if (!httpsOk && !httpsLoginOk) {
+      addLog('info', 'Fallback Test', 'HTTPS fehlgeschlagen, teste HTTP...');
+      await testEndpoint(httpUrl, 'HTTP NBI');
     }
 
-    addLog('info', 'Diagnose Ergebnis', results.join('\n'));
-    addLog('info', 'Nächste Schritte',
-      '• Zertifikat/CORS prüfen (Browser blockiert Details)\n' +
-      '• Host/IP korrekt? Port 443 offen?\n' +
-      '• Proxy/Firewall zwischen App und CSM\n' +
-      '• Vom Host testen: curl -vk https://<CSM-IP>/nbi/login' );
+    // Zusätzliche Diagnose-Informationen
+    addLog('info', 'Browser-Umgebung', 
+      `User-Agent: ${navigator.userAgent.substring(0, 100)}...\n` +
+      `Protokoll: ${window.location.protocol}\n` +
+      `Host: ${window.location.host}`);
+
+    // Zusammenfassung
+    const successRate = ((totalTests - failedTests) / totalTests * 100).toFixed(0);
+    addLog('info', 'Diagnose Zusammenfassung', 
+      `${totalTests} Tests durchgeführt, ${failedTests} fehlgeschlagen (${successRate}% erfolgreich)\n\n` +
+      results.join('\n'));
+
+    // Spezifische Troubleshooting-Schritte
+    if (failedTests === totalTests) {
+      addLog('warning', 'Alle Tests fehlgeschlagen - Mögliche Ursachen', 
+        '1. CSM Server ist nicht gestartet oder reagiert nicht\n' +
+        '2. IP-Adresse/Hostname ist falsch\n' +
+        '3. Firewall blockiert Port 443/80\n' +
+        '4. Netzwerk-Routing-Problem\n' +
+        '5. CSM NBI Service ist deaktiviert');
+        
+      addLog('info', 'Empfohlene Schritte zur Fehlerbehebung',
+        '1. Ping-Test: ping ' + ip + '\n' +
+        '2. Port-Test: telnet ' + ip + ' 443\n' +
+        '3. CSM Login über Browser: https://' + ip + '/login\n' +
+        '4. CSM NBI aktivieren: Administration → License → NBI\n' +
+        '5. Firewall-Regeln prüfen\n' +
+        '6. CSM Logs prüfen: $CSM_HOME/log/');
+    } else {
+      addLog('info', 'Nächste Schritte',
+        'Verbindung teilweise erfolgreich - CORS könnte die API-Antworten blockieren.\n' +
+        'Versuchen Sie jetzt die CSM-Anmeldung mit Ihren Zugangsdaten.');
+    }
   };
 
   const testFMCConnection = async () => {
