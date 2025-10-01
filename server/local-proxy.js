@@ -68,10 +68,22 @@ app.post('/csm-proxy', async (req, res) => {
           xml: `<?xml version="1.0" encoding="UTF-8"?>\n<ns1:loginRequest xmlns:ns1="http://www.cisco.com/security/manager/nbi">\n  <ns1:protVersion>1.0</ns1:protVersion>\n  <ns1:username>${username}</ns1:username>\n  <ns1:password>${password}</ns1:password>\n</ns1:loginRequest>`,
           contentType: 'text/xml',
         },
+        // URI namespace with protVersion + serviceVersion + reqId
+        {
+          name: 'uri-ns-protVersion+serviceVersion+reqId',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest xmlns="http://www.cisco.com/security/manager/nbi">\n  <protVersion>1.0</protVersion>\n  <serviceVersion>2.0</serviceVersion>\n  <reqId>1</reqId>\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`,
+          contentType: 'text/xml',
+        },
         // Literal "csm" namespace with protVersion
         {
           name: 'default-ns+protVersion',
           xml: `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest xmlns="csm">\n  <protVersion>1.0</protVersion>\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`,
+          contentType: 'text/xml',
+        },
+        // Literal "csm" namespace with protVersion + serviceVersion + reqId
+        {
+          name: 'default-ns+protVersion+serviceVersion+reqId',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest xmlns="csm">\n  <protVersion>1.0</protVersion>\n  <serviceVersion>2.0</serviceVersion>\n  <reqId>1</reqId>\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`,
           contentType: 'text/xml',
         },
         // Literal "csm" namespace simple
@@ -118,9 +130,9 @@ app.post('/csm-proxy', async (req, res) => {
           const start = Date.now();
           const url = `${baseUrl}${ep}`;
           const response = await axios.post(url, v.xml, {
-            headers: { 'Content-Type': v.contentType, 'Accept': 'application/xml' },
+            headers: { 'Content-Type': v.contentType, 'Accept': 'text/xml, application/xml;q=0.9, */*;q=0.8' },
             httpsAgent: agent,
-            timeout: 20000,
+            timeout: 30000,
             responseType: 'text',
             validateStatus: () => true,
           });
@@ -141,7 +153,6 @@ app.post('/csm-proxy', async (req, res) => {
           lastResponse = { response, setCookie, variant: `${ep} | ${v.name}` };
           const bodyText = String(response.data || '');
           const validationError = /validation errors|Cannot find the declaration/i.test(bodyText);
-          const noSessionError = /No session found|Authorization Failure/i.test(bodyText);
           
           // Success: 2xx with Set-Cookie
           if (response.status >= 200 && response.status < 300 && setCookie) {
@@ -155,8 +166,8 @@ app.post('/csm-proxy', async (req, res) => {
             });
           }
           
-          // Retry on schema errors, 404, or "No session found" (wrong endpoint)
-          if (response.status === 404 || validationError || (response.status === 401 && noSessionError)) {
+          // Retry on schema errors, 404, or any 401 (unauthorized)
+          if (response.status === 404 || validationError || response.status === 401) {
             continue;
           } else {
             // Other error: stop trying more variants for this endpoint
