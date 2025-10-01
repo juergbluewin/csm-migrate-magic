@@ -107,16 +107,34 @@ export class CSMClient {
           ok: result.ok,
           status: result.status,
           statusText: result.statusText,
+          variant: result.variant,
           hasCookie: !!result.headers?.['set-cookie'] || !!result.headers?.['Set-Cookie'],
         });
         if (result.ok) {
           const setCookieHeader = result.headers?.['set-cookie'] || result.headers?.['Set-Cookie'];
-          const sessionCookie = setCookieHeader?.match(/asCookie=([^;]+)/)?.[1];
-          if (sessionCookie) {
+          
+          // Parse all cookies from Set-Cookie header(s)
+          const cookies: string[] = [];
+          if (setCookieHeader) {
+            const cookieArray = Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader];
+            for (const cookieStr of cookieArray) {
+              // Extract cookie name=value pairs (before first semicolon)
+              const match = cookieStr.match(/^([^=]+)=([^;]+)/);
+              if (match) {
+                cookies.push(`${match[1]}=${match[2]}`);
+              }
+            }
+          }
+          
+          if (cookies.length > 0) {
             this.session = {
-              cookie: `asCookie=${sessionCookie}`,
+              cookie: cookies.join('; '),
               baseUrl,
             };
+            console.log('✅ Session erstellt:', { 
+              cookieCount: cookies.length, 
+              variant: result.variant 
+            });
             return true;
           }
           throw new Error('Login erfolgreich, aber kein Session-Cookie erhalten');
@@ -214,20 +232,35 @@ export class CSMClient {
         ok: result.ok,
         status: result.status,
         statusText: result.statusText,
+        variant: result.variant,
         hasCookie: !!result.headers?.['set-cookie'] || !!result.headers?.['Set-Cookie']
       });
 
       if (result.ok) {
         const setCookieHeader = result.headers['set-cookie'] || result.headers['Set-Cookie'];
-        const sessionCookie = setCookieHeader?.match(/asCookie=([^;]+)/)?.[1];
         
-        if (sessionCookie) {
+        // Parse all cookies from Set-Cookie header(s)
+        const cookies: string[] = [];
+        if (setCookieHeader) {
+          const cookieArray = Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader];
+          for (const cookieStr of cookieArray) {
+            // Extract cookie name=value pairs (before first semicolon)
+            const match = cookieStr.match(/^([^=]+)=([^;]+)/);
+            if (match) {
+              cookies.push(`${match[1]}=${match[2]}`);
+            }
+          }
+        }
+        
+        if (cookies.length > 0) {
           this.session = {
-            cookie: `asCookie=${sessionCookie}`,
+            cookie: cookies.join('; '),
             baseUrl
           };
           console.log('✅ CSM Login erfolgreich!', {
             hasSession: !!this.session,
+            cookieCount: cookies.length,
+            variant: result.variant,
             baseUrl
           });
           return true;

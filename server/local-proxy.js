@@ -47,52 +47,64 @@ app.post('/csm-proxy', async (req, res) => {
     console.log(`[${requestId}] CSM Local Proxy ->`, { action, ipAddress, endpoint: endpoint || '/nbi/login', verifyTls, isPrivateIP: isPrivateIP(ipAddress) });
 
     if (action === 'login') {
-      // Try multiple potential login endpoints and XML namespace variants
+      // Prioritize likely endpoints, deprioritize /userservice/login (which returned 401 "No session")
       const endpoints = [
-        '/login',
         '/securityservice/login',
+        '/login',
         '/auth/login',
         '/userservice/login'
       ];
 
       const variants = [
-        // Cisco responses show xmlns "csm"; try default namespace with that literal value
+        // Try URI namespace with proper element ordering (protVersion first per Cisco schema)
         {
-          name: 'default-ns-simple',
-          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest xmlns="csm">\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`,
+          name: 'uri-ns-protVersion-first',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest xmlns="http://www.cisco.com/security/manager/nbi">\n  <protVersion>1.0</protVersion>\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`,
           contentType: 'text/xml',
         },
-        // Prefixed version using the same literal namespace value
+        // URI namespace with prefixed form
         {
-          name: 'prefixed-ns-simple',
-          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<ns1:loginRequest xmlns:ns1="csm">\n  <ns1:username>${username}</ns1:username>\n  <ns1:password>${password}</ns1:password>\n</ns1:loginRequest>`,
+          name: 'uri-ns-prefixed',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<ns1:loginRequest xmlns:ns1="http://www.cisco.com/security/manager/nbi">\n  <ns1:protVersion>1.0</ns1:protVersion>\n  <ns1:username>${username}</ns1:username>\n  <ns1:password>${password}</ns1:password>\n</ns1:loginRequest>`,
           contentType: 'text/xml',
         },
-        // Some deployments require reqId first
-        {
-          name: 'default-ns-with-reqId',
-          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest xmlns="csm">\n  <reqId>1</reqId>\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`,
-          contentType: 'text/xml',
-        },
-        // protVersion may be required and must precede others in some schemas
+        // Literal "csm" namespace with protVersion
         {
           name: 'default-ns+protVersion',
           xml: `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest xmlns="csm">\n  <protVersion>1.0</protVersion>\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`,
           contentType: 'text/xml',
         },
-        // Try a plausible URI-style namespace
+        // Literal "csm" namespace simple
+        {
+          name: 'default-ns-simple',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest xmlns="csm">\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`,
+          contentType: 'text/xml',
+        },
+        // Prefixed csm namespace
+        {
+          name: 'prefixed-ns-simple',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<ns1:loginRequest xmlns:ns1="csm">\n  <ns1:username>${username}</ns1:username>\n  <ns1:password>${password}</ns1:password>\n</ns1:loginRequest>`,
+          contentType: 'text/xml',
+        },
+        // With reqId
+        {
+          name: 'default-ns-with-reqId',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest xmlns="csm">\n  <reqId>1</reqId>\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`,
+          contentType: 'text/xml',
+        },
+        // URI namespace simple
         {
           name: 'uri-ns-simple',
           xml: `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest xmlns="http://www.cisco.com/security/manager/nbi">\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`,
           contentType: 'text/xml',
         },
-        // Try root element without namespace
+        // No namespace
         {
           name: 'login-root-no-ns',
           xml: `<?xml version="1.0" encoding="UTF-8"?>\n<login>\n  <username>${username}</username>\n  <password>${password}</password>\n</login>`,
           contentType: 'text/xml',
         },
-        // Capitalized element name
+        // Capitalized
         {
           name: 'LoginRequest-capital',
           xml: `<?xml version="1.0" encoding="UTF-8"?>\n<LoginRequest>\n  <username>${username}</username>\n  <password>${password}</password>\n</LoginRequest>`,
@@ -113,11 +125,25 @@ app.post('/csm-proxy', async (req, res) => {
             validateStatus: () => true,
           });
           const duration = Date.now() - start;
-          const setCookie = response.headers['set-cookie'] ? response.headers['set-cookie'].join(', ') : undefined;
-          console.log(`[${requestId}] <- CSM Response (${ep} | ${v.name})`, { status: response.status, ok: response.status >= 200 && response.status < 300, duration: `${duration}ms`, hasSetCookie: !!setCookie });
+          
+          // Parse all Set-Cookie headers properly
+          const setCookieHeaders = response.headers['set-cookie'];
+          const setCookie = setCookieHeaders ? (Array.isArray(setCookieHeaders) ? setCookieHeaders.join(', ') : setCookieHeaders) : undefined;
+          
+          console.log(`[${requestId}] <- CSM Response (${ep} | ${v.name})`, { 
+            status: response.status, 
+            ok: response.status >= 200 && response.status < 300, 
+            duration: `${duration}ms`, 
+            hasSetCookie: !!setCookie,
+            cookieCount: setCookieHeaders ? (Array.isArray(setCookieHeaders) ? setCookieHeaders.length : 1) : 0
+          });
+          
           lastResponse = { response, setCookie, variant: `${ep} | ${v.name}` };
           const bodyText = String(response.data || '');
           const validationError = /validation errors|Cannot find the declaration/i.test(bodyText);
+          const noSessionError = /No session found|Authorization Failure/i.test(bodyText);
+          
+          // Success: 2xx with Set-Cookie
           if (response.status >= 200 && response.status < 300 && setCookie) {
             return res.status(200).json({
               ok: true,
@@ -128,11 +154,12 @@ app.post('/csm-proxy', async (req, res) => {
               variant: `${ep} | ${v.name}`,
             });
           }
-          // Retry on typical schema/404 responses
-          if (response.status === 404 || validationError) {
+          
+          // Retry on schema errors, 404, or "No session found" (wrong endpoint)
+          if (response.status === 404 || validationError || (response.status === 401 && noSessionError)) {
             continue;
           } else {
-            // non-schema error: stop trying more variants for this endpoint
+            // Other error: stop trying more variants for this endpoint
             break;
           }
         }
