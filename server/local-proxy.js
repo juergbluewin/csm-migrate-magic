@@ -56,6 +56,18 @@ app.post('/csm-proxy', async (req, res) => {
       ];
 
       const variants = [
+        // EXACT working format from Python example with prefixed csm namespace + heartbeatRequested
+        {
+          name: 'csm-prefix+protVersion+reqId+heartbeat',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<csm:loginRequest xmlns:csm="csm">\n  <protVersion>1.0</protVersion>\n  <reqId>1</reqId>\n  <username>${username}</username>\n  <password>${password}</password>\n  <heartbeatRequested>false</heartbeatRequested>\n</csm:loginRequest>`,
+          contentType: 'text/xml',
+        },
+        // Same but without namespace prefix (default namespace)
+        {
+          name: 'csm-default+protVersion+reqId+heartbeat',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest xmlns="csm">\n  <protVersion>1.0</protVersion>\n  <reqId>1</reqId>\n  <username>${username}</username>\n  <password>${password}</password>\n  <heartbeatRequested>false</heartbeatRequested>\n</loginRequest>`,
+          contentType: 'text/xml',
+        },
         // Try URI namespace with proper element ordering (protVersion first per Cisco schema)
         {
           name: 'uri-ns-protVersion-first',
@@ -130,7 +142,11 @@ app.post('/csm-proxy', async (req, res) => {
           const start = Date.now();
           const url = `${baseUrl}${ep}`;
           const response = await axios.post(url, v.xml, {
-            headers: { 'Content-Type': v.contentType, 'Accept': 'text/xml, application/xml;q=0.9, */*;q=0.8' },
+            headers: { 
+              'Content-Type': v.contentType, 
+              'Accept': 'application/xml',
+              'User-Agent': 'curl/8.5.0'
+            },
             httpsAgent: agent,
             timeout: 30000,
             responseType: 'text',
