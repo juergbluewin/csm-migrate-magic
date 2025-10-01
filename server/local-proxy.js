@@ -47,65 +47,94 @@ app.post('/csm-proxy', async (req, res) => {
     console.log(`[${requestId}] CSM Local Proxy ->`, { action, ipAddress, endpoint: endpoint || '/nbi/login', verifyTls, isPrivateIP: isPrivateIP(ipAddress) });
 
     if (action === 'login') {
+      // Try multiple potential login endpoints and XML namespace variants
+      const endpoints = [
+        '/login',
+        '/securityservice/login',
+        '/auth/login',
+        '/userservice/login'
+      ];
+
       const variants = [
+        // Cisco responses show xmlns "csm"; try default namespace with that literal value
         {
           name: 'default-ns-simple',
           xml: `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest xmlns="csm">\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`,
           contentType: 'text/xml',
         },
+        // Prefixed version using the same literal namespace value
         {
           name: 'prefixed-ns-simple',
           xml: `<?xml version="1.0" encoding="UTF-8"?>\n<ns1:loginRequest xmlns:ns1="csm">\n  <ns1:username>${username}</ns1:username>\n  <ns1:password>${password}</ns1:password>\n</ns1:loginRequest>`,
           contentType: 'text/xml',
         },
+        // Some deployments require reqId first
         {
           name: 'default-ns-with-reqId',
           xml: `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest xmlns="csm">\n  <reqId>1</reqId>\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`,
           contentType: 'text/xml',
         },
+        // protVersion may be required and must precede others in some schemas
         {
           name: 'default-ns+protVersion',
           xml: `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest xmlns="csm">\n  <protVersion>1.0</protVersion>\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`,
           contentType: 'text/xml',
         },
+        // Try a plausible URI-style namespace
         {
-          name: 'no-namespace',
-          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest>\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`,
+          name: 'uri-ns-simple',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest xmlns="http://www.cisco.com/security/manager/nbi">\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`,
+          contentType: 'text/xml',
+        },
+        // Try root element without namespace
+        {
+          name: 'login-root-no-ns',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<login>\n  <username>${username}</username>\n  <password>${password}</password>\n</login>`,
+          contentType: 'text/xml',
+        },
+        // Capitalized element name
+        {
+          name: 'LoginRequest-capital',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<LoginRequest>\n  <username>${username}</username>\n  <password>${password}</password>\n</LoginRequest>`,
           contentType: 'text/xml',
         },
       ];
 
       let lastResponse;
-      for (const v of variants) {
-        const start = Date.now();
-        const response = await axios.post(`${baseUrl}/login`, v.xml, {
-          headers: { 'Content-Type': v.contentType, 'Accept': 'text/xml' },
-          httpsAgent: agent,
-          timeout: 20000,
-          responseType: 'text',
-          validateStatus: () => true,
-        });
-        const duration = Date.now() - start;
-        const setCookie = response.headers['set-cookie'] ? response.headers['set-cookie'].join(', ') : undefined;
-        console.log(`[${requestId}] <- CSM Response (${v.name})`, { status: response.status, ok: response.status >= 200 && response.status < 300, duration: `${duration}ms`, hasSetCookie: !!setCookie });
-        lastResponse = { response, setCookie, variant: v.name };
-        const bodyText = String(response.data || '');
-        const validationError = /validation errors|Cannot find the declaration/i.test(bodyText);
-        if (response.status >= 200 && response.status < 300 && setCookie) {
-          return res.status(200).json({
-            ok: true,
-            status: response.status,
-            statusText: response.statusText,
-            body: response.data,
-            headers: { 'set-cookie': setCookie },
-            variant: v.name,
+      for (const ep of endpoints) {
+        for (const v of variants) {
+          const start = Date.now();
+          const url = `${baseUrl}${ep}`;
+          const response = await axios.post(url, v.xml, {
+            headers: { 'Content-Type': v.contentType, 'Accept': 'application/xml' },
+            httpsAgent: agent,
+            timeout: 20000,
+            responseType: 'text',
+            validateStatus: () => true,
           });
-        }
-        // Retry on typical schema/404 responses
-        if (response.status === 404 || validationError) {
-          continue;
-        } else {
-          break;
+          const duration = Date.now() - start;
+          const setCookie = response.headers['set-cookie'] ? response.headers['set-cookie'].join(', ') : undefined;
+          console.log(`[${requestId}] <- CSM Response (${ep} | ${v.name})`, { status: response.status, ok: response.status >= 200 && response.status < 300, duration: `${duration}ms`, hasSetCookie: !!setCookie });
+          lastResponse = { response, setCookie, variant: `${ep} | ${v.name}` };
+          const bodyText = String(response.data || '');
+          const validationError = /validation errors|Cannot find the declaration/i.test(bodyText);
+          if (response.status >= 200 && response.status < 300 && setCookie) {
+            return res.status(200).json({
+              ok: true,
+              status: response.status,
+              statusText: response.statusText,
+              body: response.data,
+              headers: { 'set-cookie': setCookie },
+              variant: `${ep} | ${v.name}`,
+            });
+          }
+          // Retry on typical schema/404 responses
+          if (response.status === 404 || validationError) {
+            continue;
+          } else {
+            // non-schema error: stop trying more variants for this endpoint
+            break;
+          }
         }
       }
 
