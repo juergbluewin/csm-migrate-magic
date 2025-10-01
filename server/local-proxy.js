@@ -49,28 +49,37 @@ app.post('/csm-proxy', async (req, res) => {
     if (action === 'login') {
       const variants = [
         {
-          name: 'default-ns+protVersion',
-          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest xmlns="csm">\n  <protVersion>1.0</protVersion>\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`
-        },
-        {
           name: 'default-ns-simple',
-          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest xmlns="csm">\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`
+          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest xmlns="csm">\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`,
+          contentType: 'text/xml',
         },
         {
-          name: 'prefixed-ns',
-          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<ns1:loginRequest xmlns:ns1="csm">\n  <ns1:username>${username}</ns1:username>\n  <ns1:password>${password}</ns1:password>\n</ns1:loginRequest>`
+          name: 'prefixed-ns-simple',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<ns1:loginRequest xmlns:ns1="csm">\n  <ns1:username>${username}</ns1:username>\n  <ns1:password>${password}</ns1:password>\n</ns1:loginRequest>`,
+          contentType: 'text/xml',
         },
         {
-          name: 'wrapped-request',
-          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<request xmlns="csm">\n  <protVersion>1.0</protVersion>\n  <loginRequest>\n    <username>${username}</username>\n    <password>${password}</password>\n  </loginRequest>\n</request>`
-        }
+          name: 'default-ns-with-reqId',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest xmlns="csm">\n  <reqId>1</reqId>\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`,
+          contentType: 'text/xml',
+        },
+        {
+          name: 'default-ns+protVersion',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest xmlns="csm">\n  <protVersion>1.0</protVersion>\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`,
+          contentType: 'text/xml',
+        },
+        {
+          name: 'no-namespace',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest>\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`,
+          contentType: 'text/xml',
+        },
       ];
 
       let lastResponse;
       for (const v of variants) {
         const start = Date.now();
         const response = await axios.post(`${baseUrl}/login`, v.xml, {
-          headers: { 'Content-Type': 'application/xml', 'Accept': 'application/xml' },
+          headers: { 'Content-Type': v.contentType, 'Accept': 'text/xml' },
           httpsAgent: agent,
           timeout: 20000,
           responseType: 'text',

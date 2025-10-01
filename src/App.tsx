@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
-
+import LiveNetworkLog from "./components/debug/LiveNetworkLog";
 const queryClient = new QueryClient();
 
 const App = () => (
@@ -20,8 +20,11 @@ const App = () => (
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
+      {/* Live Netzwerk Log Panel */}
+      <LiveNetworkLog />
     </TooltipProvider>
   </QueryClientProvider>
 );
 
 export default App;
+
