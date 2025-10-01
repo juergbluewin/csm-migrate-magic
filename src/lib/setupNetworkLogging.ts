@@ -142,7 +142,4 @@ export function initNetworkLogging() {
   );
 }
 
-// Auto-init in browser
-if (typeof window !== 'undefined') {
-  initNetworkLogging();
-}
+// Do NOT auto-init here - let main.tsx call it explicitly after React is ready

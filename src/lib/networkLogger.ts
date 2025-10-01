@@ -29,7 +29,9 @@ class NetworkLogger {
     this.listeners.add(listener);
     // emit current state immediately
     listener(this.state);
-    return () => this.listeners.delete(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
   }
 
   enable(v: boolean) {
