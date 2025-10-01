@@ -33,6 +33,12 @@ interface CSMCLIQuery {
 export class CSMClient {
   private session: CSMSession | null = null;
   private proxyUrl = `https://wlupuoyuccrwvfpabvli.supabase.co/functions/v1/csm-proxy`;
+  private directMode: boolean = false;
+
+  setDirectMode(enabled: boolean) {
+    this.directMode = enabled;
+    console.log(`🔧 CSM Client Mode: ${enabled ? 'DIRECT (lokales Netzwerk)' : 'PROXY (über Cloud)'}`);
+  }
 
   private isPrivateIP(ip: string): boolean {
     const parts = ip.split('.').map(Number);
@@ -54,16 +60,89 @@ export class CSMClient {
       ipAddress,
       username,
       verifyTls,
+      mode: this.directMode ? 'DIRECT' : 'PROXY',
       isPrivateIP: this.isPrivateIP(ipAddress),
       timestamp: new Date().toISOString()
     });
 
-    // Warnung bei privaten IP-Adressen
+    // DIREKTER MODUS: Browser -> CSM (lokales Netzwerk)
+    if (this.directMode) {
+      console.log('🎯 Direkter Modus: Verbinde direkt zum CSM im lokalen Netzwerk');
+      
+      const loginXml = `<?xml version="1.0" encoding="UTF-8"?>
+        <loginRequest>
+          <username>${username}</username>
+          <password>${password}</password>
+        </loginRequest>`;
+
+      try {
+        const requestStart = Date.now();
+        const response = await fetch(`${baseUrl}/login`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/xml',
+            'Accept': 'application/xml',
+          },
+          body: loginXml,
+        });
+
+        const requestDuration = Date.now() - requestStart;
+        const responseText = await response.text();
+        
+        console.log('📥 CSM Direktantwort:', {
+          status: response.status,
+          statusText: response.statusText,
+          duration: `${requestDuration}ms`,
+          ok: response.ok
+        });
+
+        if (response.ok) {
+          const setCookieHeader = response.headers.get('set-cookie');
+          const sessionCookie = setCookieHeader?.match(/asCookie=([^;]+)/)?.[1];
+          
+          if (sessionCookie) {
+            this.session = {
+              cookie: `asCookie=${sessionCookie}`,
+              baseUrl
+            };
+            console.log('✅ CSM Login erfolgreich (direkter Modus)!');
+            return true;
+          } else {
+            console.error('❌ Kein Session-Cookie in der Antwort gefunden');
+            throw new Error('Login erfolgreich, aber kein Session-Cookie erhalten');
+          }
+        }
+        
+        throw new Error(`CSM Login fehlgeschlagen: ${response.status} ${response.statusText}\n${responseText}`);
+        
+      } catch (error: any) {
+        console.error('❌ Direkter CSM Login Fehler:', error);
+        
+        if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+          throw new Error(
+            `Direktverbindung zu ${ipAddress} fehlgeschlagen.\n\n` +
+            `Mögliche Ursachen:\n` +
+            `- CSM-Server ist nicht erreichbar\n` +
+            `- Falsche IP-Adresse\n` +
+            `- CORS nicht konfiguriert auf CSM\n` +
+            `- Netzwerkproblem\n\n` +
+            `Tipp: Überprüfen Sie die Browser-Konsole für CORS-Fehler`
+          );
+        }
+        
+        throw error;
+      }
+    }
+
+    // PROXY MODUS: Browser -> Cloud Proxy -> CSM
+    console.log('☁️ Proxy Modus: Verbinde über Cloud-Proxy');
+    
+    // Warnung bei privaten IP-Adressen im Proxy-Modus
     if (this.isPrivateIP(ipAddress)) {
-      console.warn('⚠️ WARNUNG: Private IP-Adresse erkannt!', {
+      console.warn('⚠️ WARNUNG: Private IP-Adresse im Proxy-Modus!', {
         ipAddress,
         message: 'Der Cloud-Proxy kann private IP-Adressen nicht erreichen.',
-        suggestion: 'Verwenden Sie eine öffentliche IP oder DNS-Namen, oder führen Sie die Anwendung lokal aus.'
+        suggestion: 'Aktivieren Sie den "Direkten Modus" für lokale Netzwerk-Verbindungen.'
       });
     }
     
@@ -199,6 +278,24 @@ export class CSMClient {
         <offset>${offset}</offset>
       </getPolicyObjectsListByTypeRequest>`;
 
+    if (this.directMode) {
+      const response = await fetch(`${this.session.baseUrl}/configservice/getPolicyObjectsListByType`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/xml',
+          'Accept': 'application/xml',
+          'Cookie': this.session.cookie,
+        },
+        body: requestXml,
+      });
+
+      if (!response.ok) {
+        throw new Error(`CSM API Fehler: ${response.status} ${response.statusText}`);
+      }
+
+      return await response.text();
+    }
+
     try {
       const response = await fetch(this.proxyUrl, {
         method: 'POST',
@@ -244,6 +341,24 @@ export class CSMClient {
         </${wrapperTag}>
       </getPolicyObjectRequest>`;
 
+    if (this.directMode) {
+      const response = await fetch(`${this.session.baseUrl}/configservice/getPolicyObject`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/xml',
+          'Accept': 'application/xml',
+          'Cookie': this.session.cookie,
+        },
+        body: requestXml,
+      });
+
+      if (!response.ok) {
+        throw new Error(`CSM API Fehler: ${response.status} ${response.statusText}`);
+      }
+
+      return await response.text();
+    }
+
     const response = await fetch(this.proxyUrl, {
       method: 'POST',
       headers: {
@@ -278,6 +393,24 @@ export class CSMClient {
         <policyName>${policyName}</policyName>
         <policyType>${policyType}</policyType>
       </getPolicyConfigByNameRequest>`;
+
+    if (this.directMode) {
+      const response = await fetch(`${this.session.baseUrl}/configservice/getPolicyConfigByName`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/xml',
+          'Accept': 'application/xml',
+          'Cookie': this.session.cookie,
+        },
+        body: requestXml,
+      });
+
+      if (!response.ok) {
+        throw new Error(`CSM API Fehler: ${response.status} ${response.statusText}`);
+      }
+
+      return await response.text();
+    }
 
     const response = await fetch(this.proxyUrl, {
       method: 'POST',
@@ -314,6 +447,24 @@ export class CSMClient {
         <policyType>${policyType}</policyType>
       </getPolicyConfigByDeviceGIDRequest>`;
 
+    if (this.directMode) {
+      const response = await fetch(`${this.session.baseUrl}/configservice/getPolicyConfigByDeviceGID`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/xml',
+          'Accept': 'application/xml',
+          'Cookie': this.session.cookie,
+        },
+        body: requestXml,
+      });
+
+      if (!response.ok) {
+        throw new Error(`CSM API Fehler: ${response.status} ${response.statusText}`);
+      }
+
+      return await response.text();
+    }
+
     const response = await fetch(this.proxyUrl, {
       method: 'POST',
       headers: {
@@ -349,6 +500,24 @@ export class CSMClient {
         <cmd>${command}</cmd>
         ${argument ? `<argument>${argument}</argument>` : ''}
       </execDeviceReadOnlyCLICmdsRequest>`;
+
+    if (this.directMode) {
+      const response = await fetch(`${this.session.baseUrl}/utilservice/execDeviceReadOnlyCLICmds`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/xml',
+          'Accept': 'application/xml',
+          'Cookie': this.session.cookie,
+        },
+        body: requestXml,
+      });
+
+      if (!response.ok) {
+        throw new Error(`CSM API Fehler: ${response.status} ${response.statusText}`);
+      }
+
+      return await response.text();
+    }
 
     const response = await fetch(this.proxyUrl, {
       method: 'POST',

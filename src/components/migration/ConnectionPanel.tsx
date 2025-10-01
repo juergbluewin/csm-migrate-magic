@@ -4,7 +4,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Eye, EyeOff, Shield, Network, Wifi, WifiOff, Loader2 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Eye, EyeOff, Shield, Network, Wifi, WifiOff, Loader2, Radio } from "lucide-react";
 import { ConnectionStatus, CSMConnection, FMCConnection, LogEntry } from "../CiscoMigrationTool";
 
 
@@ -29,6 +30,7 @@ export const ConnectionPanel = ({
 }: ConnectionPanelProps) => {
   const [showCsmPassword, setShowCsmPassword] = useState(false);
   const [showFmcPassword, setShowFmcPassword] = useState(false);
+  const [directMode, setDirectMode] = useState(true); // Default: Direkter Modus für lokales Netzwerk
 
   const testCSMConnection = async () => {
     if (!csmConnection.ipAddress || !csmConnection.username || !csmConnection.password) {
@@ -42,6 +44,7 @@ export const ConnectionPanel = ({
 
       const { CSMClient } = await import('@/lib/csmClient');
       const client = new CSMClient();
+      client.setDirectMode(directMode);
       
       const success = await client.login({
         ipAddress: csmConnection.ipAddress,
@@ -315,6 +318,32 @@ export const ConnectionPanel = ({
               />
               TLS-Zertifikat verifizieren
             </Label>
+          </div>
+
+          <div className="space-y-3 p-3 bg-muted/50 rounded-lg border">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Radio className="h-4 w-4 text-primary" />
+                <Label htmlFor="direct-mode" className="text-sm font-medium cursor-pointer">
+                  Direkter Modus (Lokales Netzwerk)
+                </Label>
+              </div>
+              <Switch
+                id="direct-mode"
+                checked={directMode}
+                onCheckedChange={setDirectMode}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {directMode 
+                ? "✓ Browser verbindet direkt zum CSM (kein Internet benötigt)" 
+                : "☁️ Verbindung über Cloud-Proxy (Internet erforderlich)"}
+            </p>
+            {!directMode && (
+              <p className="text-xs text-warning">
+                ⚠️ Cloud-Proxy kann keine privaten IP-Adressen erreichen
+              </p>
+            )}
           </div>
           
           <div className="space-y-2">
