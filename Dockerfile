@@ -22,5 +22,5 @@ RUN npm install -g serve
 # Expose port 3000
 EXPOSE 3000
 
-# Start the application
-CMD ["serve", "-s", "dist", "-l", "3000"]
+# Start the application (custom local proxy + static hosting)
+CMD ["node", "server/local-proxy.js"]
