@@ -47,7 +47,11 @@ app.post('/csm-proxy', async (req, res) => {
     console.log(`[${requestId}] CSM Local Proxy ->`, { action, ipAddress, endpoint: endpoint || '/nbi/login', isPrivateIP: isPrivateIP(ipAddress) });
 
     if (action === 'login') {
-      const loginXml = `<?xml version="1.0" encoding="UTF-8"?>\n        <loginRequest>\n          <username>${username}</username>\n          <password>${password}</password>\n        </loginRequest>`;
+      const loginXml = `<?xml version="1.0" encoding="UTF-8"?>
+<loginRequest xmlns="csm">
+  <username>${username}</username>
+  <password>${password}</password>
+</loginRequest>`;
 
       const start = Date.now();
       const response = await axios.post(`${baseUrl}/login`, loginXml, {
