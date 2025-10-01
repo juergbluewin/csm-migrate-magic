@@ -49,8 +49,9 @@ app.post('/csm-proxy', async (req, res) => {
     if (action === 'login') {
       const loginXml = `<?xml version="1.0" encoding="UTF-8"?>
 <ns1:loginRequest xmlns:ns1="csm">
-  <username>${username}</username>
-  <password>${password}</password>
+  <ns1:protVersion>1.0</ns1:protVersion>
+  <ns1:username>${username}</ns1:username>
+  <ns1:password>${password}</ns1:password>
 </ns1:loginRequest>`;
 
       const start = Date.now();
