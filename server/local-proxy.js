@@ -47,32 +47,68 @@ app.post('/csm-proxy', async (req, res) => {
     console.log(`[${requestId}] CSM Local Proxy ->`, { action, ipAddress, endpoint: endpoint || '/nbi/login', verifyTls, isPrivateIP: isPrivateIP(ipAddress) });
 
     if (action === 'login') {
-      const loginXml = `<?xml version="1.0" encoding="UTF-8"?>
-<loginRequest xmlns="csm">
-  <protVersion>1.0</protVersion>
-  <username>${username}</username>
-  <password>${password}</password>
-</loginRequest>`;
+      const variants = [
+        {
+          name: 'default-ns+protVersion',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest xmlns="csm">\n  <protVersion>1.0</protVersion>\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`
+        },
+        {
+          name: 'default-ns-simple',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest xmlns="csm">\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`
+        },
+        {
+          name: 'prefixed-ns',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<ns1:loginRequest xmlns:ns1="csm">\n  <ns1:username>${username}</ns1:username>\n  <ns1:password>${password}</ns1:password>\n</ns1:loginRequest>`
+        },
+        {
+          name: 'wrapped-request',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>\n<request xmlns="csm">\n  <protVersion>1.0</protVersion>\n  <loginRequest>\n    <username>${username}</username>\n    <password>${password}</password>\n  </loginRequest>\n</request>`
+        }
+      ];
 
-      const start = Date.now();
-      const response = await axios.post(`${baseUrl}/login`, loginXml, {
-        headers: { 'Content-Type': 'application/xml', 'Accept': 'application/xml' },
-        httpsAgent: agent,
-        timeout: 20000,
-        responseType: 'text',
-        validateStatus: () => true,
-      });
-      const duration = Date.now() - start;
-      const setCookie = response.headers['set-cookie'] ? response.headers['set-cookie'].join(', ') : undefined;
+      let lastResponse;
+      for (const v of variants) {
+        const start = Date.now();
+        const response = await axios.post(`${baseUrl}/login`, v.xml, {
+          headers: { 'Content-Type': 'application/xml', 'Accept': 'application/xml' },
+          httpsAgent: agent,
+          timeout: 20000,
+          responseType: 'text',
+          validateStatus: () => true,
+        });
+        const duration = Date.now() - start;
+        const setCookie = response.headers['set-cookie'] ? response.headers['set-cookie'].join(', ') : undefined;
+        console.log(`[${requestId}] <- CSM Response (${v.name})`, { status: response.status, ok: response.status >= 200 && response.status < 300, duration: `${duration}ms`, hasSetCookie: !!setCookie });
+        lastResponse = { response, setCookie, variant: v.name };
+        const bodyText = String(response.data || '');
+        const validationError = /validation errors|Cannot find the declaration/i.test(bodyText);
+        if (response.status >= 200 && response.status < 300 && setCookie) {
+          return res.status(200).json({
+            ok: true,
+            status: response.status,
+            statusText: response.statusText,
+            body: response.data,
+            headers: { 'set-cookie': setCookie },
+            variant: v.name,
+          });
+        }
+        // Retry on typical schema/404 responses
+        if (response.status === 404 || validationError) {
+          continue;
+        } else {
+          break;
+        }
+      }
 
-      console.log(`[${requestId}] <- CSM Response`, { status: response.status, ok: response.status >= 200 && response.status < 300, duration: `${duration}ms`, hasSetCookie: !!setCookie });
-
+      // Return last attempt
+      const { response, setCookie, variant } = lastResponse || {};
       return res.status(200).json({
-        ok: response.status >= 200 && response.status < 300,
-        status: response.status,
-        statusText: response.statusText,
-        body: response.data,
+        ok: response ? (response.status >= 200 && response.status < 300) : false,
+        status: response?.status ?? 500,
+        statusText: response?.statusText ?? 'No response',
+        body: response?.data,
         headers: { 'set-cookie': setCookie },
+        variant,
       });
     }
 
