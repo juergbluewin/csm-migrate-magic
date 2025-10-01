@@ -32,37 +32,35 @@ interface CSMCLIQuery {
 
 export class CSMClient {
   private session: CSMSession | null = null;
+  private proxyUrl = `https://wlupuoyuccrwvfpabvli.supabase.co/functions/v1/csm-proxy`;
 
   async login({ ipAddress, username, password, verifyTls }: CSMLoginRequest): Promise<boolean> {
     const baseUrl = `https://${ipAddress}/nbi`;
     
-    const loginXml = `<?xml version="1.0" encoding="UTF-8"?>
-      <loginRequest>
-        <username>${username}</username>
-        <password>${password}</password>
-      </loginRequest>`;
-
     try {
-      const response = await fetch(`${baseUrl}/login`, {
+      const response = await fetch(this.proxyUrl, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/xml',
-          'Accept': 'application/xml',
-          'X-Requested-With': 'XMLHttpRequest',
+          'Content-Type': 'application/json',
         },
-        body: loginXml,
-        mode: 'cors',
-        credentials: 'include',
-        // Handle CORS and certificate issues
-        ...((!verifyTls) && {
-          // Note: This doesn't actually disable TLS verification in browsers
-          // It's handled by the CSM server configuration
+        body: JSON.stringify({
+          action: 'login',
+          ipAddress,
+          username,
+          password,
+          verifyTls
         })
       });
 
-      if (response.ok) {
-        const cookies = response.headers.get('set-cookie');
-        const sessionCookie = cookies?.match(/asCookie=([^;]+)/)?.[1];
+      if (!response.ok) {
+        throw new Error(`Proxy-Fehler: ${response.status} ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      
+      if (result.ok) {
+        const setCookieHeader = result.headers['set-cookie'] || result.headers['Set-Cookie'];
+        const sessionCookie = setCookieHeader?.match(/asCookie=([^;]+)/)?.[1];
         
         if (sessionCookie) {
           this.session = {
@@ -73,30 +71,15 @@ export class CSMClient {
         }
       }
       
-      // Enhanced error handling
-      const errorText = await response.text().catch(() => 'Unbekannter Fehler');
-      throw new Error(`HTTP ${response.status}: ${response.statusText}. ${errorText}`);
+      throw new Error(`Login fehlgeschlagen: ${result.status} ${result.statusText}. ${result.body}`);
       
     } catch (error: any) {
       console.error('CSM Login error:', error);
       
-      // Provide specific error messages for common Docker/Linux issues
       if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
-        throw new Error('Netzwerkfehler: CSM Server nicht erreichbar. Überprüfen Sie:\n' +
-          '- CSM IP-Adresse ist korrekt\n' +
-          '- CSM Server läuft und ist über Port 443 erreichbar\n' +
-          '- Docker Container kann CSM Server erreichen\n' +
-          '- Firewall-Regeln erlauben die Verbindung');
-      }
-      
-      if (error.message.includes('CORS')) {
-        throw new Error('CORS-Fehler: CSM Server blockiert Browser-Zugriff.\n' +
-          'Lösung: CORS auf CSM Server konfigurieren oder Proxy verwenden.');
-      }
-      
-      if (error.message.includes('certificate') || error.message.includes('SSL')) {
-        throw new Error('TLS/SSL-Zertifikatsfehler: CSM verwendet selbstsigniertes Zertifikat.\n' +
-          'Versuchen Sie "TLS-Zertifikat verifizieren" zu deaktivieren.');
+        throw new Error('Netzwerkfehler: CSM Proxy nicht erreichbar. Überprüfen Sie:\n' +
+          '- Internetverbindung ist aktiv\n' +
+          '- Lovable Cloud Backend ist erreichbar');
       }
       
       throw error;
@@ -114,24 +97,31 @@ export class CSMClient {
       </getPolicyObjectsListByTypeRequest>`;
 
     try {
-      const response = await fetch(`${this.session.baseUrl}/configservice/getPolicyObjectsListByType`, {
+      const response = await fetch(this.proxyUrl, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/xml',
-          'Accept': 'application/xml',
-          'Cookie': this.session.cookie,
+          'Content-Type': 'application/json',
         },
-        body: requestXml,
-        mode: 'cors',
-        credentials: 'include',
+        body: JSON.stringify({
+          action: 'request',
+          ipAddress: this.session.baseUrl.replace('https://', '').replace('/nbi', ''),
+          endpoint: '/configservice/getPolicyObjectsListByType',
+          body: requestXml,
+          cookie: this.session.cookie
+        })
       });
 
       if (!response.ok) {
-        const errorText = await response.text().catch(() => '');
-        throw new Error(`Fehler beim Abrufen der Policy-Objekte (${response.status}): ${response.statusText}. ${errorText}`);
+        throw new Error(`Proxy-Fehler: ${response.status} ${response.statusText}`);
       }
 
-      return await response.text();
+      const result = await response.json();
+      
+      if (!result.ok) {
+        throw new Error(`Fehler beim Abrufen der Policy-Objekte (${result.status}): ${result.statusText}`);
+      }
+
+      return result.body;
     } catch (error: any) {
       if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
         throw new Error('Netzwerkfehler beim Abrufen der Policy-Objekte. CSM-Verbindung unterbrochen.');
@@ -151,20 +141,30 @@ export class CSMClient {
         </${wrapperTag}>
       </getPolicyObjectRequest>`;
 
-    const response = await fetch(`${this.session.baseUrl}/configservice/getPolicyObject`, {
+    const response = await fetch(this.proxyUrl, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/xml',
-        'Cookie': this.session.cookie,
+        'Content-Type': 'application/json',
       },
-      body: requestXml,
+      body: JSON.stringify({
+        action: 'request',
+        ipAddress: this.session.baseUrl.replace('https://', '').replace('/nbi', ''),
+        endpoint: '/configservice/getPolicyObject',
+        body: requestXml,
+        cookie: this.session.cookie
+      })
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to get policy object: ${response.statusText}`);
+      throw new Error(`Proxy-Fehler: ${response.status} ${response.statusText}`);
     }
 
-    return await response.text();
+    const result = await response.json();
+    if (!result.ok) {
+      throw new Error(`Failed to get policy object: ${result.statusText}`);
+    }
+
+    return result.body;
   }
 
   async getPolicyConfigByName(policyName: string, policyType: string = 'DeviceAccessRuleFirewallPolicy') {
@@ -176,20 +176,30 @@ export class CSMClient {
         <policyType>${policyType}</policyType>
       </getPolicyConfigByNameRequest>`;
 
-    const response = await fetch(`${this.session.baseUrl}/configservice/getPolicyConfigByName`, {
+    const response = await fetch(this.proxyUrl, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/xml',
-        'Cookie': this.session.cookie,
+        'Content-Type': 'application/json',
       },
-      body: requestXml,
+      body: JSON.stringify({
+        action: 'request',
+        ipAddress: this.session.baseUrl.replace('https://', '').replace('/nbi', ''),
+        endpoint: '/configservice/getPolicyConfigByName',
+        body: requestXml,
+        cookie: this.session.cookie
+      })
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to get policy config: ${response.statusText}`);
+      throw new Error(`Proxy-Fehler: ${response.status} ${response.statusText}`);
     }
 
-    return await response.text();
+    const result = await response.json();
+    if (!result.ok) {
+      throw new Error(`Failed to get policy config: ${result.statusText}`);
+    }
+
+    return result.body;
   }
 
   async getPolicyConfigByDeviceGID(deviceGID: string, policyType: string = 'DeviceAccessRuleFirewallPolicy') {
@@ -201,20 +211,30 @@ export class CSMClient {
         <policyType>${policyType}</policyType>
       </getPolicyConfigByDeviceGIDRequest>`;
 
-    const response = await fetch(`${this.session.baseUrl}/configservice/getPolicyConfigByDeviceGID`, {
+    const response = await fetch(this.proxyUrl, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/xml',
-        'Cookie': this.session.cookie,
+        'Content-Type': 'application/json',
       },
-      body: requestXml,
+      body: JSON.stringify({
+        action: 'request',
+        ipAddress: this.session.baseUrl.replace('https://', '').replace('/nbi', ''),
+        endpoint: '/configservice/getPolicyConfigByDeviceGID',
+        body: requestXml,
+        cookie: this.session.cookie
+      })
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to get policy config by device: ${response.statusText}`);
+      throw new Error(`Proxy-Fehler: ${response.status} ${response.statusText}`);
     }
 
-    return await response.text();
+    const result = await response.json();
+    if (!result.ok) {
+      throw new Error(`Failed to get policy config by device: ${result.statusText}`);
+    }
+
+    return result.body;
   }
 
   async execDeviceReadOnlyCLICmds({ deviceIP, command, argument }: CSMCLIQuery) {
@@ -227,20 +247,30 @@ export class CSMClient {
         ${argument ? `<argument>${argument}</argument>` : ''}
       </execDeviceReadOnlyCLICmdsRequest>`;
 
-    const response = await fetch(`${this.session.baseUrl}/utilservice/execDeviceReadOnlyCLICmds`, {
+    const response = await fetch(this.proxyUrl, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/xml',
-        'Cookie': this.session.cookie,
+        'Content-Type': 'application/json',
       },
-      body: requestXml,
+      body: JSON.stringify({
+        action: 'request',
+        ipAddress: this.session.baseUrl.replace('https://', '').replace('/nbi', ''),
+        endpoint: '/utilservice/execDeviceReadOnlyCLICmds',
+        body: requestXml,
+        cookie: this.session.cookie
+      })
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to execute CLI command: ${response.statusText}`);
+      throw new Error(`Proxy-Fehler: ${response.status} ${response.statusText}`);
     }
 
-    return await response.text();
+    const result = await response.json();
+    if (!result.ok) {
+      throw new Error(`Failed to execute CLI command: ${result.statusText}`);
+    }
+
+    return result.body;
   }
 
   logout() {

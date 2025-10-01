@@ -1,1 +1,4 @@
 project_id = "wlupuoyuccrwvfpabvli"
+
+[functions.csm-proxy]
+verify_jwt = false
