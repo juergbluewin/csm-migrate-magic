@@ -36,9 +36,14 @@ export class CSMClient {
   private localProxyUrl = `/csm-proxy`;
   private directMode: boolean = false;
 
+  private isRunningLocally(): boolean {
+    return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  }
+
   setDirectMode(enabled: boolean) {
     this.directMode = enabled;
-    console.log(`🔧 CSM Client Mode: ${enabled ? 'LOKALER PROXY (Same-Origin)' : 'PROXY (über Cloud)'}`);
+    const actualMode = this.isRunningLocally() ? 'LOKALER PROXY (localhost:3000/csm-proxy)' : (enabled ? 'DIRECT (Browser->CSM)' : 'CLOUD PROXY');
+    console.log(`🔧 CSM Client Mode: ${actualMode}`);
   }
 
   private isPrivateIP(ip: string): boolean {
@@ -66,9 +71,11 @@ export class CSMClient {
       timestamp: new Date().toISOString()
     });
 
-    // LOKALER PROXY MODUS: Browser -> Local Proxy (Same-Origin) -> CSM (LAN)
-    if (this.directMode) {
-      console.log('🎯 Lokaler Proxy: Verwende Same-Origin Proxy /csm-proxy');
+    // AUTO-DETECT: Wenn lokal (localhost:3000), IMMER lokalen Proxy verwenden
+    const useLocalProxy = this.isRunningLocally();
+    
+    if (useLocalProxy) {
+      console.log('🎯 Lokaler Modus erkannt: Verwende lokalen Proxy /csm-proxy');
       try {
         const requestStart = Date.now();
         const response = await fetch(this.localProxyUrl, {
@@ -265,7 +272,7 @@ export class CSMClient {
         <offset>${offset}</offset>
       </getPolicyObjectsListByTypeRequest>`;
 
-    if (this.directMode) {
+    if (this.isRunningLocally()) {
       const response = await fetch(this.localProxyUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -328,7 +335,7 @@ export class CSMClient {
         </${wrapperTag}>
       </getPolicyObjectRequest>`;
 
-    if (this.directMode) {
+    if (this.isRunningLocally()) {
       const response = await fetch(this.localProxyUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -381,7 +388,7 @@ export class CSMClient {
         <policyType>${policyType}</policyType>
       </getPolicyConfigByNameRequest>`;
 
-    if (this.directMode) {
+    if (this.isRunningLocally()) {
       const response = await fetch(this.localProxyUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -434,7 +441,7 @@ export class CSMClient {
         <policyType>${policyType}</policyType>
       </getPolicyConfigByDeviceGIDRequest>`;
 
-    if (this.directMode) {
+    if (this.isRunningLocally()) {
       const response = await fetch(this.localProxyUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -488,7 +495,7 @@ export class CSMClient {
         ${argument ? `<argument>${argument}</argument>` : ''}
       </execDeviceReadOnlyCLICmdsRequest>`;
 
-    if (this.directMode) {
+    if (this.isRunningLocally()) {
       const response = await fetch(this.localProxyUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
