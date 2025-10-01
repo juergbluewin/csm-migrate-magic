@@ -42,16 +42,16 @@ app.post('/csm-proxy', async (req, res) => {
     if (!ipAddress) return res.status(400).json({ error: 'ipAddress required' });
 
     const baseUrl = `https://${ipAddress}/nbi`;
-    const agent = new https.Agent({ rejectUnauthorized: verifyTls !== false });
+    const agent = new https.Agent({ rejectUnauthorized: verifyTls === true });
 
-    console.log(`[${requestId}] CSM Local Proxy ->`, { action, ipAddress, endpoint: endpoint || '/nbi/login', isPrivateIP: isPrivateIP(ipAddress) });
+    console.log(`[${requestId}] CSM Local Proxy ->`, { action, ipAddress, endpoint: endpoint || '/nbi/login', verifyTls, isPrivateIP: isPrivateIP(ipAddress) });
 
     if (action === 'login') {
       const loginXml = `<?xml version="1.0" encoding="UTF-8"?>
-<loginRequest xmlns="csm">
+<ns1:loginRequest xmlns:ns1="csm">
   <username>${username}</username>
   <password>${password}</password>
-</loginRequest>`;
+</ns1:loginRequest>`;
 
       const start = Date.now();
       const response = await axios.post(`${baseUrl}/login`, loginXml, {
