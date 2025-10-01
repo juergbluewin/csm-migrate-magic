@@ -48,11 +48,11 @@ app.post('/csm-proxy', async (req, res) => {
 
     if (action === 'login') {
       const loginXml = `<?xml version="1.0" encoding="UTF-8"?>
-<ns1:loginRequest xmlns:ns1="csm">
-  <ns1:protVersion>1.0</ns1:protVersion>
-  <ns1:username>${username}</ns1:username>
-  <ns1:password>${password}</ns1:password>
-</ns1:loginRequest>`;
+<loginRequest xmlns="csm">
+  <protVersion>1.0</protVersion>
+  <username>${username}</username>
+  <password>${password}</password>
+</loginRequest>`;
 
       const start = Date.now();
       const response = await axios.post(`${baseUrl}/login`, loginXml, {
