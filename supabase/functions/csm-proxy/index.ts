@@ -16,6 +16,18 @@ interface ProxyRequest {
   cookie?: string;
 }
 
+function isPrivateIP(ip: string): boolean {
+  const parts = ip.split('.').map(Number);
+  if (parts.length !== 4) return false;
+  
+  if (parts[0] === 10) return true;
+  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+  if (parts[0] === 192 && parts[1] === 168) return true;
+  if (parts[0] === 127) return true;
+  
+  return false;
+}
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -25,7 +37,19 @@ serve(async (req) => {
   try {
     const { action, ipAddress, username, password, verifyTls, endpoint, body, cookie }: ProxyRequest = await req.json();
     
-    console.log(`CSM Proxy: ${action} to ${ipAddress}${endpoint || '/nbi/login'}`);
+    const requestId = crypto.randomUUID().substring(0, 8);
+    console.log(`[${requestId}] 📥 CSM Proxy Request:`, {
+      action,
+      ipAddress,
+      endpoint: endpoint || '/nbi/login',
+      isPrivateIP: isPrivateIP(ipAddress),
+      timestamp: new Date().toISOString()
+    });
+
+    // Warnung bei privaten IPs
+    if (isPrivateIP(ipAddress)) {
+      console.warn(`[${requestId}] ⚠️ Private IP detected: ${ipAddress} - Connection will likely fail from cloud environment`);
+    }
 
     if (action === 'login') {
       const loginXml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -36,6 +60,9 @@ serve(async (req) => {
 
       const baseUrl = `https://${ipAddress}/nbi`;
       
+      console.log(`[${requestId}] 🔐 Attempting CSM login to ${baseUrl}/login`);
+      const fetchStart = Date.now();
+      
       const response = await fetch(`${baseUrl}/login`, {
         method: 'POST',
         headers: {
@@ -45,8 +72,16 @@ serve(async (req) => {
         body: loginXml,
       });
 
+      const fetchDuration = Date.now() - fetchStart;
       const responseText = await response.text();
       const headers = Object.fromEntries(response.headers.entries());
+      
+      console.log(`[${requestId}] ✅ CSM Response:`, {
+        status: response.status,
+        ok: response.ok,
+        duration: `${fetchDuration}ms`,
+        hasSetCookie: !!headers['set-cookie']
+      });
       
       return new Response(JSON.stringify({
         ok: response.ok,
@@ -64,6 +99,9 @@ serve(async (req) => {
       const baseUrl = `https://${ipAddress}/nbi`;
       const fullUrl = endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint}`;
       
+      console.log(`[${requestId}] 📤 CSM API Request to ${fullUrl}`);
+      const fetchStart = Date.now();
+      
       const response = await fetch(fullUrl, {
         method: 'POST',
         headers: {
@@ -74,7 +112,14 @@ serve(async (req) => {
         body: body,
       });
 
+      const fetchDuration = Date.now() - fetchStart;
       const responseText = await response.text();
+      
+      console.log(`[${requestId}] ✅ API Response:`, {
+        status: response.status,
+        ok: response.ok,
+        duration: `${fetchDuration}ms`
+      });
       
       return new Response(JSON.stringify({
         ok: response.ok,
@@ -93,10 +138,19 @@ serve(async (req) => {
     });
 
   } catch (error: any) {
-    console.error('CSM Proxy error:', error);
+    const requestId = crypto.randomUUID().substring(0, 8);
+    console.error(`[${requestId}] ❌ CSM Proxy error:`, {
+      name: error.name,
+      message: error.message,
+      code: error.code,
+      stack: error.stack
+    });
+    
     return new Response(JSON.stringify({ 
       error: error.message || 'Internal server error',
-      details: error.toString()
+      details: error.toString(),
+      code: error.code,
+      requestId
     }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

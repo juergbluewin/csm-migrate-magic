@@ -34,10 +34,43 @@ export class CSMClient {
   private session: CSMSession | null = null;
   private proxyUrl = `https://wlupuoyuccrwvfpabvli.supabase.co/functions/v1/csm-proxy`;
 
+  private isPrivateIP(ip: string): boolean {
+    const parts = ip.split('.').map(Number);
+    if (parts.length !== 4) return false;
+    
+    // Check for private IP ranges
+    if (parts[0] === 10) return true; // 10.0.0.0/8
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true; // 172.16.0.0/12
+    if (parts[0] === 192 && parts[1] === 168) return true; // 192.168.0.0/16
+    if (parts[0] === 127) return true; // 127.0.0.0/8 (localhost)
+    
+    return false;
+  }
+
   async login({ ipAddress, username, password, verifyTls }: CSMLoginRequest): Promise<boolean> {
     const baseUrl = `https://${ipAddress}/nbi`;
     
+    console.log('🔐 CSM Login Versuch:', {
+      ipAddress,
+      username,
+      verifyTls,
+      isPrivateIP: this.isPrivateIP(ipAddress),
+      timestamp: new Date().toISOString()
+    });
+
+    // Warnung bei privaten IP-Adressen
+    if (this.isPrivateIP(ipAddress)) {
+      console.warn('⚠️ WARNUNG: Private IP-Adresse erkannt!', {
+        ipAddress,
+        message: 'Der Cloud-Proxy kann private IP-Adressen nicht erreichen.',
+        suggestion: 'Verwenden Sie eine öffentliche IP oder DNS-Namen, oder führen Sie die Anwendung lokal aus.'
+      });
+    }
+    
     try {
+      console.log('📤 Sende Login-Request an Proxy...');
+      
+      const requestStart = Date.now();
       const response = await fetch(this.proxyUrl, {
         method: 'POST',
         headers: {
@@ -52,12 +85,65 @@ export class CSMClient {
         })
       });
 
+      const requestDuration = Date.now() - requestStart;
+      console.log('📥 Proxy-Antwort erhalten:', {
+        status: response.status,
+        statusText: response.statusText,
+        duration: `${requestDuration}ms`,
+        ok: response.ok
+      });
+
       if (!response.ok) {
-        throw new Error(`Proxy-Fehler: ${response.status} ${response.statusText}`);
+        const errorText = await response.text();
+        let errorDetails;
+        try {
+          errorDetails = JSON.parse(errorText);
+        } catch {
+          errorDetails = { message: errorText };
+        }
+
+        console.error('❌ Proxy-Fehler Details:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorDetails,
+          isPrivateIP: this.isPrivateIP(ipAddress)
+        });
+
+        // Spezifische Fehlermeldungen
+        if (errorDetails.error?.includes('Connection timed out') || errorDetails.error?.includes('ETIMEDOUT')) {
+          if (this.isPrivateIP(ipAddress)) {
+            throw new Error(
+              `Verbindung nicht möglich: Private IP-Adresse (${ipAddress})\n\n` +
+              `Der Cloud-Proxy kann keine privaten Netzwerk-IPs erreichen.\n\n` +
+              `Lösungen:\n` +
+              `1. Verwenden Sie die öffentliche IP-Adresse des CSM-Servers\n` +
+              `2. Verwenden Sie einen DNS-Namen statt einer IP\n` +
+              `3. Führen Sie die Anwendung lokal aus (Docker)`
+            );
+          } else {
+            throw new Error(
+              `Verbindungs-Timeout zu ${ipAddress}\n\n` +
+              `Mögliche Ursachen:\n` +
+              `- CSM-Server ist nicht erreichbar\n` +
+              `- Firewall blockiert die Verbindung\n` +
+              `- Falsche IP-Adresse oder Port\n` +
+              `- CSM-Server ist nicht gestartet`
+            );
+          }
+        }
+
+        throw new Error(`Proxy-Fehler: ${response.status} ${response.statusText}\n${JSON.stringify(errorDetails, null, 2)}`);
       }
 
       const result = await response.json();
       
+      console.log('✅ Login-Response Details:', {
+        ok: result.ok,
+        status: result.status,
+        statusText: result.statusText,
+        hasCookie: !!result.headers?.['set-cookie'] || !!result.headers?.['Set-Cookie']
+      });
+
       if (result.ok) {
         const setCookieHeader = result.headers['set-cookie'] || result.headers['Set-Cookie'];
         const sessionCookie = setCookieHeader?.match(/asCookie=([^;]+)/)?.[1];
@@ -67,19 +153,36 @@ export class CSMClient {
             cookie: `asCookie=${sessionCookie}`,
             baseUrl
           };
+          console.log('✅ CSM Login erfolgreich!', {
+            hasSession: !!this.session,
+            baseUrl
+          });
           return true;
+        } else {
+          console.error('❌ Kein Session-Cookie in der Antwort gefunden', {
+            headers: result.headers
+          });
         }
       }
       
-      throw new Error(`Login fehlgeschlagen: ${result.status} ${result.statusText}. ${result.body}`);
+      const errorMsg = `Login fehlgeschlagen: ${result.status} ${result.statusText}`;
+      console.error('❌', errorMsg, {
+        body: result.body
+      });
+      
+      throw new Error(`${errorMsg}\n${result.body || 'Keine Details verfügbar'}`);
       
     } catch (error: any) {
-      console.error('CSM Login error:', error);
+      console.error('❌ CSM Login error:', error);
       
       if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
-        throw new Error('Netzwerkfehler: CSM Proxy nicht erreichbar. Überprüfen Sie:\n' +
+        throw new Error(
+          'Netzwerkfehler: CSM Proxy nicht erreichbar.\n\n' +
+          'Überprüfen Sie:\n' +
           '- Internetverbindung ist aktiv\n' +
-          '- Lovable Cloud Backend ist erreichbar');
+          '- Lovable Cloud Backend ist erreichbar\n' +
+          '- Browser-Konsole für weitere Details'
+        );
       }
       
       throw error;
