@@ -51,6 +51,15 @@ function cookieHeaderFor(ip, url) {
   }
 }
 
+// einfache Queue pro IP, um Race Conditions zu verhindern
+const inFlight = new Map();
+async function serialize(ip, fn) {
+  const last = inFlight.get(ip) || Promise.resolve();
+  const p = last.then(fn, fn);
+  inFlight.set(ip, p.catch(() => {}));
+  return p;
+}
+
 function resolvePath(ip, incomingPath) {
   const hint = loginHints.get(ip);
   const basePath = hint?.basePath || '';
@@ -71,7 +80,7 @@ app.post('/csm-proxy', async (req, res) => {
 
     console.log(`[${requestId}] CSM Local Proxy ->`, { action, ipAddress, endpoint: endpoint || '/nbi/login', verifyTls, isPrivateIP: isPrivateIP(ipAddress) });
 
-      if (action === 'login') {
+      if (action === 'login') { return await serialize(ipAddress, async () => {
         // Warm-up: GET /nbi/ to obtain initial cookies (e.g., asCookie) some CSM setups set on first touch
         try {
           const warm = await axios.get(`${baseUrl}/`, {
@@ -123,7 +132,9 @@ app.post('/csm-proxy', async (req, res) => {
                   loginHints.set(ipAddress, { 
                     ep: '/securityservice/login', 
                     basePath: '/nbi',
-                    variantName: 'warmup-2-step' 
+                    variantName: 'warmup-2-step',
+                    protocol: 'https',
+                    port: 443,
                   });
                   return res.status(200).json({
                     ok: true,
@@ -279,7 +290,9 @@ app.post('/csm-proxy', async (req, res) => {
               loginHints.set(ipAddress, { 
                 ep, 
                 basePath: ep.startsWith('/nbi/') ? '/nbi' : '',
-                variantName: v.name 
+                variantName: v.name,
+                protocol: 'https',
+                port: 443,
               });
               return res.status(200).json({
                 ok: true,
@@ -346,7 +359,9 @@ app.post('/csm-proxy', async (req, res) => {
             loginHints.set(ipAddress, { 
               ep, 
               basePath: ep.startsWith('/nbi/') ? '/nbi' : '',
-              variantName: v.name + ' (asCookie-only)' 
+              variantName: v.name + ' (asCookie-only)', 
+              protocol: 'https',
+              port: 443,
             });
             return res.status(200).json({
               ok: true,
@@ -405,7 +420,9 @@ app.post('/csm-proxy', async (req, res) => {
                   loginHints.set(ipAddress, { 
                     ep: '/securityservice/login', 
                     basePath: '/nbi',
-                    variantName: 'uri-ns-protVersion-first (2-step)' 
+                    variantName: 'uri-ns-protVersion-first (2-step)', 
+                    protocol: 'https',
+                    port: 443,
                   });
                   return res.status(200).json({
                     ok: true,
@@ -432,7 +449,9 @@ app.post('/csm-proxy', async (req, res) => {
             loginHints.set(ipAddress, { 
               ep, 
               basePath: ep.startsWith('/nbi/') ? '/nbi' : '',
-              variantName: v.name 
+              variantName: v.name,
+              protocol: 'https',
+              port: 443,
             });
             return res.status(200).json({
               ok: true,
@@ -464,11 +483,14 @@ app.post('/csm-proxy', async (req, res) => {
         headers: { 'set-cookie': setCookie },
         variant,
       });
-    }
+    });
 
     if (action === 'request' && endpoint) {
       const resolvedEndpoint = resolvePath(ipAddress, endpoint);
-      const fullUrl = resolvedEndpoint.startsWith('http') ? resolvedEndpoint : `${baseUrl}${resolvedEndpoint}`;
+      const hint2 = loginHints.get(ipAddress);
+      const protocol2 = hint2?.protocol || 'https';
+      const port2 = hint2?.port ? `:${hint2.port}` : '';
+      const fullUrl = resolvedEndpoint.startsWith('http') ? resolvedEndpoint : `${protocol2}://${ipAddress}${port2}${resolvedEndpoint}`;
       const start = Date.now();
       
       // Cookie aus Jar holen statt manuell übergeben
@@ -496,6 +518,16 @@ app.post('/csm-proxy', async (req, res) => {
         hasCookie: !!cookieStr
       });
 
+      // Set-Cookie aus jeder Antwort persistent in die Jar übernehmen
+      const setCookieResp = response.headers['set-cookie'] || response.headers['Set-Cookie'] || [];
+      const setCookiesArr = Array.isArray(setCookieResp) ? setCookieResp : (setCookieResp ? [setCookieResp] : []);
+      if (setCookiesArr.length > 0) {
+        const jar = jarFor(ipAddress);
+        for (const c of setCookiesArr) {
+          try { jar.setCookieSync(c, fullUrl); } catch {}
+        }
+      }
+
       return res.status(200).json({
         ok: response.status >= 200 && response.status < 300,
         status: response.status,
@@ -509,6 +541,67 @@ app.post('/csm-proxy', async (req, res) => {
     console.error(`[${requestId}] ❌ Local Proxy Error:`, error?.message);
     return res.status(500).json({ error: error?.message || 'Internal server error', details: String(error), requestId });
   }
+});
+
+// Verbindung testen ohne Re-Login und ohne Cookie-Reset
+app.post('/proxy/test', async (req, res) => {
+  const { ipAddress, verifyTls } = req.body || {};
+  const requestId = Math.random().toString(36).slice(2, 10);
+  if (!ipAddress) return res.status(400).json({ error: 'ipAddress required' });
+
+  return serialize(ipAddress, async () => {
+    try {
+      const hint = loginHints.get(ipAddress) || {};
+      const protocol = hint.protocol || 'https';
+      const port = hint.port ? `:${hint.port}` : '';
+      const agent = new https.Agent({ rejectUnauthorized: verifyTls === true });
+
+      const testPath = resolvePath(ipAddress, '/configservice/getVersion');
+      const targetUrl = `${protocol}://${ipAddress}${port}${testPath}`;
+
+      const headers = {
+        'Content-Type': 'application/xml',
+        'Accept': 'application/xml',
+        'User-Agent': 'curl/8.5.0',
+      };
+      const cookies = cookieHeaderFor(ipAddress, targetUrl);
+      if (cookies) headers['Cookie'] = cookies;
+
+      const testBody = '<getVersionRequest xmlns="csm"/>';
+      const start = Date.now();
+      const resp = await axios.post(targetUrl, testBody, {
+        headers,
+        httpsAgent: agent,
+        timeout: 15000,
+        responseType: 'text',
+        validateStatus: () => true,
+        proxy: false,
+      });
+      const duration = Date.now() - start;
+      console.log(`[${requestId}] /proxy/test -> ${targetUrl}`, { status: resp.status, duration: `${duration}ms`, hasCookie: !!cookies });
+
+      // Set-Cookie aus der Antwort persistent in die Jar übernehmen
+      const setCookieResp = resp.headers['set-cookie'] || resp.headers['Set-Cookie'] || [];
+      const arr = Array.isArray(setCookieResp) ? setCookieResp : (setCookieResp ? [setCookieResp] : []);
+      if (arr.length > 0) {
+        const jar = jarFor(ipAddress);
+        for (const c of arr) {
+          try { jar.setCookieSync(c, targetUrl); } catch {}
+        }
+      }
+
+      const isXml = /^\s*</.test(String(resp.data || ''));
+      return res.status(200).json({
+        ok: resp.status === 200 && isXml,
+        status: resp.status,
+        statusText: resp.statusText,
+        body: resp.data,
+      });
+    } catch (e) {
+      console.error(`[${requestId}] /proxy/test error`, e?.message || e);
+      return res.status(500).json({ error: e?.message || 'Internal error' });
+    }
+  });
 });
 
 // Static hosting
