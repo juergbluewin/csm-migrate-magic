@@ -44,7 +44,6 @@ export const ConnectionPanel = ({
 
       const { CSMClient } = await import('@/lib/csmClient');
       const client = new CSMClient();
-      client.setDirectMode(directMode);
       
       const success = await client.login({
         ipAddress: csmConnection.ipAddress,

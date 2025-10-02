@@ -37,6 +37,7 @@ function isPrivateIP(ip) {
 
 const loginHints = new Map();
 const cookieJars = new Map();
+const sessions = new Map(); // IP -> { cookie, baseUrl, lastUsed }
 
 function jarFor(ip) {
   if (!cookieJars.has(ip)) cookieJars.set(ip, new CookieJar());
@@ -53,18 +54,17 @@ function cookieHeaderFor(ip, url) {
 
 // Logout + Cookie-Clear für saubere Session-Beendigung
 async function cleanupSession(ipAddress, baseUrl, agent) {
-  const jar = jarFor(ipAddress);
+  const session = sessions.get(ipAddress);
   
-  if (hasSession(ipAddress, baseUrl)) {
+  if (session && session.cookie) {
     try {
       const logoutXml = '<?xml version="1.0" encoding="UTF-8"?>\n<csm:logoutRequest xmlns:csm="csm"/>';
-      const cookies = cookieHeaderFor(ipAddress, `${baseUrl}/logout`);
       await axios.post(`${baseUrl}/logout`, logoutXml, {
         headers: {
           'Content-Type': 'application/xml',
           'Accept': 'application/xml',
           'User-Agent': 'curl/8.5.0',
-          ...(cookies ? { 'Cookie': cookies } : {}),
+          'Cookie': session.cookie,
         },
         httpsAgent: agent,
         timeout: 10000,
@@ -75,13 +75,8 @@ async function cleanupSession(ipAddress, baseUrl, agent) {
     }
   }
 
-  // Cookie-Jar komplett leeren
-  const allCookies = jar.getCookiesSync(baseUrl);
-  for (const cookie of allCookies) {
-    try {
-      jar.setCookieSync(`${cookie.key}=; Max-Age=0; Path=${cookie.path}`, baseUrl);
-    } catch {}
-  }
+  // Session löschen
+  sessions.delete(ipAddress);
 }
 
 // einfache Queue pro IP, um Race Conditions zu verhindern
@@ -103,13 +98,9 @@ async function withSingleLogin(ip, fn) {
 }
 
 // Session-Prüfung: gültiges asCookie vorhanden?
-function hasSession(ip, baseUrl) {
-  try {
-    const cookies = jarFor(ip).getCookiesSync(baseUrl);
-    return cookies.some((c) => c.key === 'asCookie' && !c.isExpired());
-  } catch {
-    return false;
-  }
+function hasSession(ip) {
+  const session = sessions.get(ip);
+  return session && session.cookie && session.lastUsed && (Date.now() - session.lastUsed < 30 * 60 * 1000); // 30min
 }
 
 function resolvePath(ip, incomingPath) {
@@ -151,11 +142,24 @@ app.post('/csm-proxy', async (req, res) => {
       });
     }
 
-      if (action === 'login') { return await withSingleLogin(ipAddress, async () => {
+    if (action === 'login') {
+      return await withSingleLogin(ipAddress, async () => {
         const protocol = 'https';
         const port = 443;
         const baseUrl = `${protocol}://${ipAddress}:${port}/nbi`;
-        const jar = jarFor(ipAddress);
+
+        // Wenn Session existiert und Cookie gültig, keinen neuen Login
+        if (hasSession(ipAddress)) {
+          const session = sessions.get(ipAddress);
+          console.log(`[${requestId}] ✅ Session bereits vorhanden, kein neuer Login nötig`);
+          return res.status(200).json({
+            ok: true,
+            status: 200,
+            statusText: 'OK',
+            body: '<?xml version="1.0" encoding="UTF-8"?><csm:loginResponse xmlns:csm="csm"><protVersion>1.0</protVersion></csm:loginResponse>',
+            headers: { 'set-cookie': [`asCookie=${session.cookie}; Path=/; HttpOnly`] },
+          });
+        }
 
         // Kanonisches Login-XML gemäß offiziellem Cisco CSM API Spec
         const loginXml = `<?xml version="1.0" encoding="UTF-8"?>\n<csm:loginRequest xmlns:csm="csm">\n  <protVersion>1.0</protVersion>\n  <username>${username}</username>\n  <password>${password}</password>\n</csm:loginRequest>`;
@@ -179,18 +183,23 @@ app.post('/csm-proxy', async (req, res) => {
           proxy: false,
         });
 
-        // Set-Cookie persistent in die Jar übernehmen
+        // Set-Cookie Headers zusammenführen
         const setCookieHeaders = response.headers['set-cookie'] || response.headers['Set-Cookie'] || [];
         const setCookies = Array.isArray(setCookieHeaders) ? setCookieHeaders : (setCookieHeaders ? [setCookieHeaders] : []);
+        
+        const cookieParts = [];
         for (const c of setCookies) {
-          try { jar.setCookieSync(c, baseUrl); } catch {}
+          const match = /^([^=]+)=([^;]+)/.exec(c);
+          if (match) cookieParts.push(`${match[1]}=${match[2]}`);
         }
+        const mergedCookie = cookieParts.join('; ');
 
         const bodyText = String(response.data || '');
         const isLoginResponse = /<(?:csm:)?loginResponse[\s>]/i.test(bodyText);
         const hasAsCookie = setCookies.some(c => /^asCookie=/.test(c));
 
         if (response.status === 200 && (isLoginResponse || hasAsCookie)) {
+          sessions.set(ipAddress, { cookie: mergedCookie, baseUrl, lastUsed: Date.now() });
           loginHints.set(ipAddress, { protocol, port, basePath: '/nbi', loginPath: '/nbi/login', loginXml });
           return res.status(200).json({
             ok: true,
@@ -200,6 +209,47 @@ app.post('/csm-proxy', async (req, res) => {
             headers: { 'set-cookie': setCookies },
             variant: 'single-login',
           });
+        }
+
+        // Fehler: explizit prüfen auf Code 29
+        if (/<error><code>29<\/code>/i.test(bodyText)) {
+          console.log(`[${requestId}] ⚠️ Error Code 29 detected - user already logged in`);
+          await cleanupSession(ipAddress, baseUrl, agent);
+          await new Promise(resolve => setTimeout(resolve, 500));
+          // Ein Retry
+          const retryResponse = await axios.post(url, loginXml, {
+            headers: {
+              'Content-Type': 'application/xml',
+              'Accept': 'application/xml',
+              'User-Agent': 'curl/8.5.0',
+            },
+            httpsAgent: agent,
+            timeout: 30000,
+            responseType: 'text',
+            validateStatus: () => true,
+            maxRedirects: 0,
+            proxy: false,
+          });
+          const retryCookies = retryResponse.headers['set-cookie'] || retryResponse.headers['Set-Cookie'] || [];
+          const retryArr = Array.isArray(retryCookies) ? retryCookies : (retryCookies ? [retryCookies] : []);
+          const retryParts = [];
+          for (const c of retryArr) {
+            const match = /^([^=]+)=([^;]+)/.exec(c);
+            if (match) retryParts.push(`${match[1]}=${match[2]}`);
+          }
+          const retryMerged = retryParts.join('; ');
+          if (retryResponse.status === 200) {
+            sessions.set(ipAddress, { cookie: retryMerged, baseUrl, lastUsed: Date.now() });
+            loginHints.set(ipAddress, { protocol, port, basePath: '/nbi', loginPath: '/nbi/login', loginXml });
+            return res.status(200).json({
+              ok: true,
+              status: retryResponse.status,
+              statusText: retryResponse.statusText,
+              body: retryResponse.data,
+              headers: { 'set-cookie': retryArr },
+              variant: 'retry-after-29',
+            });
+          }
         }
 
         // Kein Discovery mehr – explizit den Fehler durchreichen
@@ -215,8 +265,9 @@ app.post('/csm-proxy', async (req, res) => {
       const fullUrl = resolvedEndpoint.startsWith('http') ? resolvedEndpoint : `${protocol2}://${ipAddress}${port2}${resolvedEndpoint}`;
       const start = Date.now();
       
-      // Cookie aus Jar holen
-      const cookieStr = cookieHeaderFor(ipAddress, fullUrl);
+      // Cookie aus Session holen
+      const session = sessions.get(ipAddress);
+      const cookieStr = session?.cookie || '';
 
       const send = async () => axios.post(fullUrl, body, {
         headers: {
@@ -235,26 +286,26 @@ app.post('/csm-proxy', async (req, res) => {
 
       let response = await send();
 
-      // Set-Cookie aus jeder Antwort persistent in die Jar übernehmen
-      const setCookieResp1 = response.headers['set-cookie'] || response.headers['Set-Cookie'] || [];
-      const setCookiesArr1 = Array.isArray(setCookieResp1) ? setCookieResp1 : (setCookieResp1 ? [setCookieResp1] : []);
-      if (setCookiesArr1.length > 0) {
-        const jar = jarFor(ipAddress);
-        for (const c of setCookiesArr1) {
-          try { jar.setCookieSync(c, fullUrl); } catch {}
-        }
+      // Session-Timeout aktualisieren
+      if (session) {
+        session.lastUsed = Date.now();
+        sessions.set(ipAddress, session);
       }
 
-      // Bei 401 ODER 404 mit loginResponse: genau ein stiller Re-Login mit gemerktem Pfad/XML, danach ein Retry
+      // Bei 401 oder 404 mit loginResponse oder XML-Fehler mit Code 29: einmalig re-login
       const bodyText1 = String(response.data || '');
       const looksLikeLoginResponse = /<(?:\w+:)?loginResponse[\s>]/i.test(bodyText1);
+      const hasCode29 = /<error><code>29<\/code>/i.test(bodyText1);
       
-      if ((response.status === 401 || (response.status === 404 && looksLikeLoginResponse)) && hint2.loginPath && hint2.loginXml) {
-        console.log(`[${requestId}] 🔄 Got ${response.status} ${looksLikeLoginResponse ? '(loginResponse)' : ''} - attempting silent re-login`);
+      if ((response.status === 401 || (response.status === 404 && looksLikeLoginResponse) || hasCode29) && hint2.loginPath && hint2.loginXml) {
+        console.log(`[${requestId}] 🔄 Got ${response.status} ${hasCode29 ? '(Code 29)' : looksLikeLoginResponse ? '(loginResponse)' : ''} - attempting silent re-login`);
         await withSingleLogin(ipAddress, async () => {
           // Erst alte Session sauber beenden
           const baseUrlForCleanup = `${protocol2}://${ipAddress}${port2}${hint2.basePath || ''}`;
           await cleanupSession(ipAddress, baseUrlForCleanup, agent);
+          
+          // 500ms warten
+          await new Promise(resolve => setTimeout(resolve, 500));
           
           // Dann neu einloggen
           const loginUrl = `${protocol2}://${ipAddress}${port2}${hint2.loginPath}`;
@@ -273,11 +324,14 @@ app.post('/csm-proxy', async (req, res) => {
           });
           const sc = lr.headers['set-cookie'] || lr.headers['Set-Cookie'] || [];
           const scArr = Array.isArray(sc) ? sc : (sc ? [sc] : []);
-          if (scArr.length > 0) {
-            const jar = jarFor(ipAddress);
-            for (const c of scArr) {
-              try { jar.setCookieSync(c, `${protocol2}://${ipAddress}${port2}${hint2.basePath || ''}`); } catch {}
-            }
+          const cookieParts = [];
+          for (const c of scArr) {
+            const match = /^([^=]+)=([^;]+)/.exec(c);
+            if (match) cookieParts.push(`${match[1]}=${match[2]}`);
+          }
+          const merged = cookieParts.join('; ');
+          if (merged) {
+            sessions.set(ipAddress, { cookie: merged, baseUrl: baseUrlForCleanup, lastUsed: Date.now() });
           }
         });
         response = await send();
@@ -290,16 +344,6 @@ app.post('/csm-proxy', async (req, res) => {
         duration: `${duration}ms`,
         hasCookie: !!cookieStr
       });
-
-      // Set-Cookie nach dem evtl. Retry nochmals übernehmen
-      const setCookieResp2 = response.headers['set-cookie'] || response.headers['Set-Cookie'] || [];
-      const setCookiesArr2 = Array.isArray(setCookieResp2) ? setCookieResp2 : (setCookieResp2 ? [setCookieResp2] : []);
-      if (setCookiesArr2.length > 0) {
-        const jar = jarFor(ipAddress);
-        for (const c of setCookiesArr2) {
-          try { jar.setCookieSync(c, fullUrl); } catch {}
-        }
-      }
 
       return res.status(200).json({
         ok: response.status >= 200 && response.status < 300,
