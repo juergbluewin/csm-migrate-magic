@@ -51,6 +51,39 @@ function cookieHeaderFor(ip, url) {
   }
 }
 
+// Logout + Cookie-Clear für saubere Session-Beendigung
+async function cleanupSession(ipAddress, baseUrl, agent) {
+  const jar = jarFor(ipAddress);
+  
+  if (hasSession(ipAddress, baseUrl)) {
+    try {
+      const logoutXml = '<?xml version="1.0" encoding="UTF-8"?>\n<csm:logoutRequest xmlns:csm="csm"/>';
+      const cookies = cookieHeaderFor(ipAddress, `${baseUrl}/logout`);
+      await axios.post(`${baseUrl}/logout`, logoutXml, {
+        headers: {
+          'Content-Type': 'application/xml',
+          'Accept': 'application/xml',
+          'User-Agent': 'curl/8.5.0',
+          ...(cookies ? { 'Cookie': cookies } : {}),
+        },
+        httpsAgent: agent,
+        timeout: 10000,
+        validateStatus: () => true,
+      });
+    } catch (e) {
+      console.log(`⚠️ Logout failed (ignored):`, e.message);
+    }
+  }
+
+  // Cookie-Jar komplett leeren
+  const allCookies = jar.getCookiesSync(baseUrl);
+  for (const cookie of allCookies) {
+    try {
+      jar.setCookieSync(`${cookie.key}=; Max-Age=0; Path=${cookie.path}`, baseUrl);
+    } catch {}
+  }
+}
+
 // einfache Queue pro IP, um Race Conditions zu verhindern
 const inFlight = new Map();
 async function serialize(ip, fn) {
@@ -109,35 +142,8 @@ app.post('/csm-proxy', async (req, res) => {
         const loginXml = `<?xml version="1.0" encoding="UTF-8"?>\n<csm:loginRequest xmlns:csm="csm">\n  <protVersion>1.0</protVersion>\n  <username>${username}</username>\n  <password>${password}</password>\n</csm:loginRequest>`;
 
         // WICHTIG: Bei neuem Login-Versuch alte Session explizit beenden
-        if (hasSession(ipAddress, baseUrl)) {
-          console.log(`[${requestId}] 🔄 Existing session found - logging out first`);
-          try {
-            const logoutXml = '<?xml version="1.0" encoding="UTF-8"?>\n<csm:logoutRequest xmlns:csm="csm"/>';
-            const cookies = cookieHeaderFor(ipAddress, `${baseUrl}/logout`);
-            await axios.post(`${baseUrl}/logout`, logoutXml, {
-              headers: {
-                'Content-Type': 'application/xml',
-                'Accept': 'application/xml',
-                'User-Agent': 'curl/8.5.0',
-                ...(cookies ? { 'Cookie': cookies } : {}),
-              },
-              httpsAgent: agent,
-              timeout: 10000,
-              validateStatus: () => true,
-            });
-          } catch (e) {
-            console.log(`[${requestId}] ⚠️ Logout failed (ignored):`, e.message);
-          }
-        }
-
-        // Cookie-Jar für diese IP komplett leeren
-        const allCookies = jar.getCookiesSync(baseUrl);
-        for (const cookie of allCookies) {
-          try {
-            jar.setCookieSync(`${cookie.key}=; Max-Age=0; Path=${cookie.path}`, baseUrl);
-          } catch {}
-        }
-        console.log(`[${requestId}] 🧹 Cleared ${allCookies.length} cookies for ${ipAddress}`);
+        console.log(`[${requestId}] 🔄 Cleaning up any existing session before login`);
+        await cleanupSession(ipAddress, baseUrl, agent);
 
         const url = `${baseUrl}/login`;
         const response = await axios.post(url, loginXml, {
@@ -222,7 +228,13 @@ app.post('/csm-proxy', async (req, res) => {
 
       // Bei 401: genau ein stiller Re-Login mit gemerktem Pfad/XML, danach ein Retry
       if (response.status === 401 && hint2.loginPath && hint2.loginXml) {
+        console.log(`[${requestId}] 🔄 Got 401 - attempting silent re-login`);
         await withSingleLogin(ipAddress, async () => {
+          // Erst alte Session sauber beenden
+          const baseUrlForCleanup = `${protocol2}://${ipAddress}${port2}${hint2.basePath || ''}`;
+          await cleanupSession(ipAddress, baseUrlForCleanup, agent);
+          
+          // Dann neu einloggen
           const loginUrl = `${protocol2}://${ipAddress}${port2}${hint2.loginPath}`;
           const lr = await axios.post(loginUrl, hint2.loginXml, {
             headers: {
