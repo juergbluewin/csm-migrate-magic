@@ -4,6 +4,7 @@ import https from 'https';
 import axios from 'axios';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import { CookieJar } from 'tough-cookie';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -35,6 +36,28 @@ function isPrivateIP(ip) {
 }
 
 const loginHints = new Map();
+const cookieJars = new Map();
+
+function jarFor(ip) {
+  if (!cookieJars.has(ip)) cookieJars.set(ip, new CookieJar());
+  return cookieJars.get(ip);
+}
+
+function cookieHeaderFor(ip, url) {
+  try { 
+    return jarFor(ip).getCookieStringSync(url); 
+  } catch { 
+    return ''; 
+  }
+}
+
+function resolvePath(ip, incomingPath) {
+  const hint = loginHints.get(ip);
+  const basePath = hint?.basePath || '';
+  if (incomingPath.startsWith('/nbi/')) return incomingPath;
+  const needsPrefix = /^\/(configservice|securityservice|userservice|deviceservice|policymanager)\b/i.test(incomingPath);
+  return needsPrefix ? `${basePath}${incomingPath}` : incomingPath;
+}
 
 app.post('/csm-proxy', async (req, res) => {
   const { action, ipAddress, username, password, verifyTls, endpoint, body, cookie } = req.body || {};
@@ -71,7 +94,8 @@ app.post('/csm-proxy', async (req, res) => {
               try {
                 const asCookiePair = asCookieHeader.split(';')[0];
                 const canonicalLoginXml = `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest xmlns="http://www.cisco.com/security/manager/nbi">\n  <protVersion>1.0</protVersion>\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`;
-                const secResp = await axios.post(`${baseUrl}/securityservice/login`, canonicalLoginXml, {
+                const secUrl = `${baseUrl}/securityservice/login`;
+                const secResp = await axios.post(secUrl, canonicalLoginXml, {
                   headers: {
                     'Content-Type': 'text/xml; charset=UTF-8',
                     'Accept': 'application/xml',
@@ -90,13 +114,23 @@ app.post('/csm-proxy', async (req, res) => {
                 const secIsLoginResponse = /<\s*loginresponse[\s>]/i.test(String(secResp.data || ''));
                 console.log(`[${requestId}] Warm 2-step /securityservice/login`, { status: secResp.status, hasSetCookie: secSetCookie.length > 0, secIsLoginResponse });
                 if (secSetCookie.length > 0 && secIsLoginResponse) {
-                  loginHints.set(ipAddress, { ep: '/securityservice/login', variantName: 'warmup-2-step' });
+                  // Cookies in Jar speichern
+                  const jar = jarFor(ipAddress);
+                  const allCookies = [...warmCookies, ...secSetCookie];
+                  for (const c of allCookies) {
+                    try { jar.setCookieSync(c, secUrl); } catch {}
+                  }
+                  loginHints.set(ipAddress, { 
+                    ep: '/securityservice/login', 
+                    basePath: '/nbi',
+                    variantName: 'warmup-2-step' 
+                  });
                   return res.status(200).json({
                     ok: true,
                     status: secResp.status,
                     statusText: secResp.statusText,
                     body: secResp.data,
-                    headers: { 'set-cookie': [...warmCookies, ...secSetCookie] },
+                    headers: { 'set-cookie': allCookies },
                     variant: `warmup -> /securityservice/login`,
                   });
                 }
@@ -237,7 +271,16 @@ app.post('/csm-proxy', async (req, res) => {
               isLoginResponse,
             });
             if (setCookie && setCookie.length > 0 && isLoginResponse) {
-              loginHints.set(ipAddress, { ep, variantName: v.name });
+              // Cookies in Jar speichern
+              const jar = jarFor(ipAddress);
+              for (const c of setCookie) {
+                try { jar.setCookieSync(c, url); } catch {}
+              }
+              loginHints.set(ipAddress, { 
+                ep, 
+                basePath: ep.startsWith('/nbi/') ? '/nbi' : '',
+                variantName: v.name 
+              });
               return res.status(200).json({
                 ok: true,
                 status: response.status,
@@ -295,7 +338,16 @@ app.post('/csm-proxy', async (req, res) => {
           // In diesem Fall Erfolg zurückgeben und 2-Step überspringen.
           const hasAsCookie = Array.isArray(setCookie) && setCookie.some(c => /^asCookie=/.test(c));
           if (!isLoginResponse && hasAsCookie) {
-            loginHints.set(ipAddress, { ep, variantName: v.name + ' (asCookie-only)' });
+            // Cookies in Jar speichern
+            const jar = jarFor(ipAddress);
+            for (const c of setCookie) {
+              try { jar.setCookieSync(c, `${baseUrl}${ep}`); } catch {}
+            }
+            loginHints.set(ipAddress, { 
+              ep, 
+              basePath: ep.startsWith('/nbi/') ? '/nbi' : '',
+              variantName: v.name + ' (asCookie-only)' 
+            });
             return res.status(200).json({
               ok: true,
               status: response.status,
@@ -344,13 +396,23 @@ app.post('/csm-proxy', async (req, res) => {
                   secIsLoginResponse
                 });
                 if (secSetCookie.length > 0 && secIsLoginResponse) {
-                  loginHints.set(ipAddress, { ep: '/securityservice/login', variantName: 'uri-ns-protVersion-first (2-step)' });
+                  // Cookies in Jar speichern
+                  const jar = jarFor(ipAddress);
+                  const allCookies = [...setCookie, ...secSetCookie];
+                  for (const c of allCookies) {
+                    try { jar.setCookieSync(c, `${baseUrl}/securityservice/login`); } catch {}
+                  }
+                  loginHints.set(ipAddress, { 
+                    ep: '/securityservice/login', 
+                    basePath: '/nbi',
+                    variantName: 'uri-ns-protVersion-first (2-step)' 
+                  });
                   return res.status(200).json({
                     ok: true,
                     status: secResp.status,
                     statusText: secResp.statusText,
                     body: secResp.data,
-                    headers: { 'set-cookie': [...setCookie, ...secSetCookie] },
+                    headers: { 'set-cookie': allCookies },
                     variant: `${ep} | ${v.name} + 2-step`,
                   });
                 }
@@ -362,7 +424,16 @@ app.post('/csm-proxy', async (req, res) => {
           
           // Success only if we have a proper loginresponse and cookies
           if (setCookie && setCookie.length > 0 && isLoginResponse) {
-            loginHints.set(ipAddress, { ep, variantName: v.name });
+            // Cookies in Jar speichern
+            const jar = jarFor(ipAddress);
+            for (const c of setCookie) {
+              try { jar.setCookieSync(c, `${baseUrl}${ep}`); } catch {}
+            }
+            loginHints.set(ipAddress, { 
+              ep, 
+              basePath: ep.startsWith('/nbi/') ? '/nbi' : '',
+              variantName: v.name 
+            });
             return res.status(200).json({
               ok: true,
               status: response.status,
@@ -396,14 +467,19 @@ app.post('/csm-proxy', async (req, res) => {
     }
 
     if (action === 'request' && endpoint) {
-      const fullUrl = endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint}`;
+      const resolvedEndpoint = resolvePath(ipAddress, endpoint);
+      const fullUrl = resolvedEndpoint.startsWith('http') ? resolvedEndpoint : `${baseUrl}${resolvedEndpoint}`;
       const start = Date.now();
+      
+      // Cookie aus Jar holen statt manuell übergeben
+      const cookieStr = cookieHeaderFor(ipAddress, fullUrl);
+      
       const response = await axios.post(fullUrl, body, {
         headers: {
           'Content-Type': 'application/xml',
           'Accept': 'application/xml',
           'User-Agent': 'curl/8.5.0',
-          ...(cookie ? { 'Cookie': cookie } : {}),
+          ...(cookieStr ? { 'Cookie': cookieStr } : {}),
         },
         httpsAgent: agent,
         timeout: 30000,
@@ -413,7 +489,12 @@ app.post('/csm-proxy', async (req, res) => {
         proxy: false,
       });
       const duration = Date.now() - start;
-      console.log(`[${requestId}] <- API Response`, { status: response.status, ok: response.status >= 200 && response.status < 300, duration: `${duration}ms` });
+      console.log(`[${requestId}] <- API Response (${resolvedEndpoint})`, { 
+        status: response.status, 
+        ok: response.status >= 200 && response.status < 300, 
+        duration: `${duration}ms`,
+        hasCookie: !!cookieStr
+      });
 
       return res.status(200).json({
         ok: response.status >= 200 && response.status < 300,
