@@ -291,9 +291,23 @@ app.post('/csm-proxy', async (req, res) => {
           const validationError = /validation errors|Cannot find the declaration/i.test(bodyText);
           const isLoginResponse = /<\s*loginresponse[\s>]/i.test(bodyText);
 
-          // If we got the app server cookie (asCookie) but not a proper loginresponse,
-          // attempt the canonical two-step login to /securityservice/login using asCookie
-          if (!isLoginResponse && setCookie && setCookie.length > 0) {
+          // FAST-PATH: viele CSM akzeptieren 1-Step (/login) und setzen nur asCookie.
+          // In diesem Fall Erfolg zurückgeben und 2-Step überspringen.
+          const hasAsCookie = Array.isArray(setCookie) && setCookie.some(c => /^asCookie=/.test(c));
+          if (!isLoginResponse && hasAsCookie) {
+            loginHints.set(ipAddress, { ep, variantName: v.name + ' (asCookie-only)' });
+            return res.status(200).json({
+              ok: true,
+              status: response.status,
+              statusText: response.statusText,
+              body: response.data,
+              headers: { 'set-cookie': setCookie },
+              variant: `${ep} | ${v.name} (asCookie-only)`,
+            });
+          }
+
+          // bisheriger 2-Step nur noch, wenn kein asCookie vorhanden ist
+          if (!isLoginResponse && setCookie && setCookie.length > 0 && !hasAsCookie) {
             const asCookieHeader = setCookie.find(c => /^asCookie=/.test(c));
             if (asCookieHeader) {
               try {
