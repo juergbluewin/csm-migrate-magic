@@ -43,14 +43,13 @@ export class CSMClient {
       body: JSON.stringify({ action: 'login', ipAddress, username, password, verifyTls })
     });
     
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Proxy-Fehler: ${response.status} ${response.statusText}\n${text}`);
-    }
-    
     const result = await response.json();
-    if (!result.ok) {
-      throw new Error(`CSM Login fehlgeschlagen: ${result.status} ${result.statusText}`);
+    
+    // Prüfe explizit auf ok:true, nicht nur HTTP-Status
+    if (result.ok !== true) {
+      const statusCode = result.status ?? response.status;
+      const statusText = result.statusText ?? response.statusText;
+      throw new Error(`CSM Login fehlgeschlagen: ${statusCode} ${statusText}`);
     }
     
     // Session nur als Platzhalter - Cookie-Verwaltung erfolgt im Proxy
@@ -82,16 +81,21 @@ export class CSMClient {
       body: JSON.stringify({ action: 'request', ipAddress, endpoint, body })
     });
     
-    if (!response.ok) {
-      throw new Error(`Proxy-Fehler: ${response.status} ${response.statusText}`);
-    }
-    
     const result = await response.json();
-    if (!result.ok) {
-      throw new Error(`CSM-Fehler ${result.status}: ${result.statusText}`);
+    
+    // Prüfe explizit auf ok:true
+    if (result.ok !== true) {
+      const statusCode = result.status ?? response.status;
+      const statusText = result.statusText ?? response.statusText;
+      
+      if (statusCode === 423) {
+        throw new Error('CSM Session gesperrt (Code 29). Bitte erneut anmelden.');
+      }
+      
+      throw new Error(`CSM Request fehlgeschlagen: ${statusCode} ${statusText}`);
     }
     
-    return result.body;
+    return String(result.body || '');
   }
 
   async getPolicyObject(objectName: string, objectType: 'NetworkPolicyObject' | 'ServicePolicyObject') {
@@ -143,11 +147,16 @@ export class CSMClient {
     const ipAddress = this.session.baseUrl.replace('https://', '').replace('/nbi', '');
     
     try {
-      await fetch(this.localProxyUrl, {
+      const response = await fetch(this.localProxyUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'logout', ipAddress })
       });
+      
+      const result = await response.json();
+      if (result.ok !== true) {
+        console.warn('⚠️ Logout-Warnung:', result.statusText);
+      }
     } catch (error) {
       console.warn('⚠️ Logout-Fehler (ignoriert):', error);
     } finally {

@@ -24,9 +24,9 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '2mb' }));
 
-// Session-Speicher: IP -> { cookie, baseUrl, lastUsed, expiresAt }
+// Session-Speicher: IP -> { cookie, baseUrl, lastUsed }
 const sessions = new Map();
-const loginHints = new Map(); // IP -> { protocol, port, basePath, loginPath, loginXml, expiresAt }
+const loginHints = new Map(); // IP -> { basePath, expiresAt }
 const serializeMap = new Map(); // IP -> Promise chain
 const inFlightLogin = new Map(); // IP -> Promise
 
@@ -77,7 +77,7 @@ function withSingleLogin(ip, fn) {
 }
 
 // Session-Validierung: Cookie vorhanden und nicht abgelaufen?
-function hasSession(ip, baseUrl) {
+function hasSession(ip) {
   const session = sessions.get(ip);
   if (!session?.cookie) return false;
   
@@ -89,8 +89,7 @@ function hasSession(ip, baseUrl) {
 
 // Pfad mit /nbi prefixen falls nötig
 function resolvePath(ip, incomingPath) {
-  const hint = loginHints.get(ip) || {};
-  const basePath = hint.basePath || '/nbi';
+  const basePath = loginHints.get(ip)?.basePath || '/nbi';
   
   if (incomingPath.startsWith('/nbi/')) return incomingPath;
   
@@ -123,7 +122,7 @@ app.post('/csm-proxy', async (req, res) => {
       // Login
       if (action === 'login') {
         // Wenn Session existiert und gültig, keinen neuen Login
-        if (hasSession(ipAddress, baseUrl)) {
+        if (hasSession(ipAddress)) {
           console.log(`[${requestId}] ✅ Session already exists, no new login needed`);
           return res.status(200).json({
             ok: true,
@@ -137,8 +136,7 @@ app.post('/csm-proxy', async (req, res) => {
           // Login-XML gemäß Cisco CSM API Spec
           const loginXml = `<?xml version="1.0" encoding="UTF-8"?>
 <csm:loginRequest xmlns:csm="csm">
-  <protVersion>1.0</protVersion>
-  <username>${username}</username>
+  <userName>${username}</userName>
   <password>${password}</password>
 </csm:loginRequest>`;
 
@@ -170,30 +168,11 @@ app.post('/csm-proxy', async (req, res) => {
 
           const bodyText = String(response.data || '');
           
-          // Session-Timeout aus Response auslesen
-          const timeoutMatch = bodyText.match(/<sessionTimeoutInMins>(\d+)<\/sessionTimeoutInMins>/i);
-          const mins = timeoutMatch ? parseInt(timeoutMatch[1], 10) : 30;
-          const expiresAt = Date.now() + mins * 60 * 1000;
-
-          // Erfolgreicher Login
-          if (response.status === 200 && /<(?:csm:)?loginResponse[\s>]/i.test(bodyText)) {
-            sessions.set(ipAddress, { cookie: mergedCookie, baseUrl, lastUsed: Date.now() });
-            loginHints.set(ipAddress, { 
-              protocol, port, basePath: '/nbi', loginPath: '/nbi/login', loginXml, expiresAt 
-            });
-            
-            console.log(`[${requestId}] ✅ Login successful, session timeout: ${mins}min`);
-            return res.status(200).json({
-              ok: true,
-              status: response.status,
-              statusText: response.statusText,
-              body: response.data,
-            });
-          }
-
-          // Fehlercode 29: einmalig cleanup + retry
+          console.log(`[CSM][LOGIN] ${ipAddress} HTTP: ${response.status}, Has Error: ${/<error>/.test(bodyText)}`);
+          
+          // Fehlercode 29 oder Login-Fehler erkennen
           if (/<error>\s*<code>\s*29\s*<\/code>/i.test(bodyText)) {
-            console.log(`[${requestId}] ⚠️ Error Code 29 - user already logged in, attempting cleanup and retry`);
+            console.warn(`[CSM][CODE29] ${ipAddress} session conflict - user already logged in`);
             await cleanupSession(ipAddress, baseUrl, agent);
             await new Promise(resolve => setTimeout(resolve, 500));
             
@@ -212,27 +191,67 @@ app.post('/csm-proxy', async (req, res) => {
               if (match) retryParts.push(`${match[1]}=${match[2]}`);
             }
             const retryMerged = retryParts.join('; ');
+            const retryBodyText = String(retryResponse.data || '');
             
-            if (retryResponse.status === 200) {
-              sessions.set(ipAddress, { cookie: retryMerged, baseUrl, lastUsed: Date.now() });
-              loginHints.set(ipAddress, { 
-                protocol, port, basePath: '/nbi', loginPath: '/nbi/login', loginXml, expiresAt 
-              });
+            if (retryResponse.status === 200 && !/<error>/i.test(retryBodyText)) {
+              const timeoutMatch = retryBodyText.match(/<sessionTimeoutInMins>(\d+)<\/sessionTimeoutInMins>/i);
+              const mins = timeoutMatch ? parseInt(timeoutMatch[1], 10) : 30;
+              const expiresAt = Date.now() + mins * 60 * 1000;
               
+              sessions.set(ipAddress, { cookie: retryMerged, baseUrl, lastUsed: Date.now() });
+              loginHints.set(ipAddress, { basePath: '/nbi', expiresAt });
+              
+              console.log(`[${requestId}] ✅ Login successful after retry, session timeout: ${mins}min`);
               return res.status(200).json({
                 ok: true,
-                status: retryResponse.status,
-                statusText: retryResponse.statusText,
+                status: 200,
+                statusText: 'OK',
                 body: retryResponse.data,
               });
             }
+            
+            return res.status(423).json({
+              ok: false,
+              status: 423,
+              statusText: 'CSM login error - session locked',
+              body: retryBodyText,
+            });
+          }
+          
+          // Andere Login-Fehler
+          if (/<error>/i.test(bodyText)) {
+            return res.status(423).json({
+              ok: false,
+              status: 423,
+              statusText: 'CSM login error',
+              body: bodyText,
+            });
           }
 
-          // Fehler durchreichen
-          return res.status(response.status >= 200 && response.status < 300 ? 200 : response.status).json({
+          // Session-Timeout aus Response auslesen
+          const timeoutMatch = bodyText.match(/<sessionTimeoutInMins>(\d+)<\/sessionTimeoutInMins>/i);
+          const mins = timeoutMatch ? parseInt(timeoutMatch[1], 10) : 30;
+          const expiresAt = Date.now() + mins * 60 * 1000;
+
+          // Erfolgreicher Login
+          if (response.status === 200 && /<(?:csm:)?loginResponse[\s>]/i.test(bodyText)) {
+            sessions.set(ipAddress, { cookie: mergedCookie, baseUrl, lastUsed: Date.now() });
+            loginHints.set(ipAddress, { basePath: '/nbi', expiresAt });
+            
+            console.log(`[${requestId}] ✅ Login successful, session timeout: ${mins}min`);
+            return res.status(200).json({
+              ok: true,
+              status: 200,
+              statusText: 'OK',
+              body: response.data,
+            });
+          }
+
+          // Sonstiger Fehler
+          return res.status(423).json({
             ok: false,
             status: response.status,
-            statusText: response.statusText,
+            statusText: response.statusText || 'Login failed',
             body: response.data,
           });
         });
@@ -258,64 +277,61 @@ app.post('/csm-proxy', async (req, res) => {
           validateStatus: () => true,
         });
 
-        let resp = await doRequest();
-        let text = String(resp.data || '');
+        let resp, text;
+        try {
+          resp = await doRequest();
+          text = String(resp.data || '');
+        } catch (e) {
+          resp = e.response;
+          text = String(resp?.data || '');
+        }
 
         // Session-Timeout aktualisieren
-        if (session) {
+        if (session && resp) {
           session.lastUsed = Date.now();
           sessions.set(ipAddress, session);
         }
 
-        // Fehlercode 29 oder 401 erkennen
+        // Fehlercode 29 erkennen
         const code29 = /<error>\s*<code>\s*29\s*<\/code>/i.test(text);
-        const is401 = resp.status === 401;
         
-        if ((code29 || is401) && loginHints.has(ipAddress)) {
-          console.log(`[${requestId}] 🔄 Got ${resp.status} ${code29 ? '(Code 29)' : '(401)'} - attempting re-login`);
-          
+        if (code29) {
+          console.warn(`[CSM][CODE29] ${ipAddress} session conflict during request`);
           await cleanupSession(ipAddress, baseUrl, agent);
-          await new Promise(resolve => setTimeout(resolve, 500));
-          
-          // Re-Login
-          await withSingleLogin(ipAddress, async () => {
-            const hint = loginHints.get(ipAddress);
-            const loginXml = hint?.loginXml || '';
-            
-            if (loginXml) {
-              const loginResp = await axios.post(`${baseUrl}/login`, loginXml, {
-                headers: { 'Content-Type': 'application/xml', 'Accept': 'application/xml' },
-                httpsAgent: agent,
-                timeout: 30000,
-                validateStatus: () => true,
-              });
-              
-              const setCookie = loginResp.headers['set-cookie'] || [];
-              const arr = Array.isArray(setCookie) ? setCookie : (setCookie ? [setCookie] : []);
-              const parts = [];
-              for (const c of arr) {
-                const match = /^([^=]+)=([^;]+)/.exec(c);
-                if (match) parts.push(`${match[1]}=${match[2]}`);
-              }
-              const merged = parts.join('; ');
-              
-              if (merged) {
-                sessions.set(ipAddress, { cookie: merged, baseUrl, lastUsed: Date.now() });
-              }
-            }
+          return res.status(423).json({
+            ok: false,
+            status: 423,
+            statusText: 'CSM session locked (Code 29)',
+            body: text,
           });
-          
-          // Retry original request
-          resp = await doRequest();
-          text = String(resp.data || '');
+        }
+
+        // 401 behandeln (nicht eingeloggt)
+        if (resp?.status === 401) {
+          console.warn(`[${requestId}] 401 Unauthorized - session expired`);
+          return res.status(401).json({
+            ok: false,
+            status: 401,
+            statusText: 'Unauthorized - please login again',
+            body: text,
+          });
+        }
+
+        if (!resp || resp.status >= 400) {
+          return res.status(resp?.status || 500).json({
+            ok: false,
+            status: resp?.status || 500,
+            statusText: resp?.statusText || 'Proxy request error',
+            body: text,
+          });
         }
 
         console.log(`[${requestId}] <- ${path} (${resp.status})`);
         
         return res.status(200).json({
-          ok: resp.status >= 200 && resp.status < 300,
-          status: resp.status,
-          statusText: resp.statusText,
+          ok: true,
+          status: 200,
+          statusText: 'OK',
           body: text,
         });
       }
@@ -323,48 +339,7 @@ app.post('/csm-proxy', async (req, res) => {
       return res.status(400).json({ error: 'Invalid action' });
       
     } catch (err) {
-      // Falls Code 29 direkt beim Login: cleanup + erneuter Login einmalig
-      const data = err?.response?.data ? String(err.response.data) : '';
-      if (action === 'login' && /<code>\s*29\s*<\/code>/i.test(data)) {
-        await cleanupSession(ipAddress, baseUrl, agent);
-        try {
-          const hint = loginHints.get(ipAddress);
-          const response = await axios.post(`${baseUrl}/login`, hint?.loginXml || req.body?.loginXml, {
-            httpsAgent: agent,
-            headers: { 'Content-Type': 'application/xml', 'Accept': 'application/xml' },
-            timeout: 30000,
-            validateStatus: () => true,
-          });
-          
-          const setCookie = response.headers['set-cookie'] || [];
-          const arr = Array.isArray(setCookie) ? setCookie : (setCookie ? [setCookie] : []);
-          const parts = [];
-          for (const c of arr) {
-            const match = /^([^=]+)=([^;]+)/.exec(c);
-            if (match) parts.push(`${match[1]}=${match[2]}`);
-          }
-          const merged = parts.join('; ');
-          
-          if (merged) {
-            sessions.set(ipAddress, { cookie: merged, baseUrl, lastUsed: Date.now() });
-          }
-          
-          return res.status(200).json({ 
-            ok: true, 
-            status: response.status, 
-            statusText: response.statusText, 
-            body: response.data 
-          });
-        } catch (e2) {
-          return res.status(500).json({ 
-            ok: false, 
-            status: 500, 
-            statusText: 'Login retry failed', 
-            body: String(e2) 
-          });
-        }
-      }
-      
+      console.error(`[${requestId}] Error:`, err?.message || err);
       return res.status(500).json({ 
         ok: false, 
         status: err?.response?.status || 500, 
@@ -406,30 +381,33 @@ app.post('/proxy/test', async (req, res) => {
     
     console.log(`[${requestId}] /proxy/test -> ${url} (${r.status})`);
     
-    // Bei Code 29 einmalig cleanup
     const data = String(r.data || '');
+    
+    // Bei Code 29 cleanup
     if (/<code>\s*29\s*<\/code>/i.test(data)) {
+      console.warn(`[CSM][CODE29] ${ipAddress} session conflict during test`);
       await cleanupSession(ipAddress, baseUrl, agent);
       return res.status(423).json({ 
         ok: false, 
         status: 423, 
-        statusText: 'CSM session locked (Code 29)' 
+        statusText: 'CSM session locked (Code 29) - please login again' 
       });
     }
     
     return res.status(200).json({ 
-      ok: r.status === 200, 
+      ok: r.status === 200 && !/<error>/i.test(data), 
       status: r.status, 
       body: r.data 
     });
   } catch (e) {
     const data = String(e?.response?.data || '');
     if (/<code>\s*29\s*<\/code>/i.test(data)) {
+      console.warn(`[CSM][CODE29] ${ipAddress} session conflict during test`);
       await cleanupSession(ipAddress, baseUrl, agent);
       return res.status(423).json({ 
         ok: false, 
         status: 423, 
-        statusText: 'CSM session locked (Code 29)' 
+        statusText: 'CSM session locked (Code 29) - please login again' 
       });
     }
     
@@ -450,6 +428,7 @@ app.use((req, res) => {
 
 // Cleanup bei Prozessende
 process.on('SIGINT', () => {
+  console.log('\n🛑 Server shutdown - cleaning up sessions...');
   sessions.clear();
   loginHints.clear();
   serializeMap.clear();
