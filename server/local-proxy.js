@@ -163,13 +163,15 @@ app.post('/csm-proxy', async (req, res) => {
             });
             const duration = Date.now() - start;
             const setCookieHeaders = response.headers['set-cookie'];
-            const setCookie = setCookieHeaders ? (Array.isArray(setCookieHeaders) ? setCookieHeaders.join(', ') : setCookieHeaders) : undefined;
+            const setCookie = setCookieHeaders
+              ? (Array.isArray(setCookieHeaders) ? setCookieHeaders : [setCookieHeaders])
+              : undefined;
             console.log(`[${requestId}] <- CSM Response (HINT ${ep} | ${v.name})`, { 
               status: response.status, 
               ok: response.status >= 200 && response.status < 300, 
               duration: `${duration}ms`, 
               hasSetCookie: !!setCookie,
-              cookieCount: setCookieHeaders ? (Array.isArray(setCookieHeaders) ? setCookieHeaders.length : 1) : 0,
+              cookieCount: Array.isArray(setCookie) ? setCookie.length : (setCookie ? 1 : 0),
             });
             if (setCookie) {
               loginHints.set(ipAddress, { ep, variantName: v.name });
@@ -208,14 +210,16 @@ app.post('/csm-proxy', async (req, res) => {
           
           // Parse all Set-Cookie headers properly
           const setCookieHeaders = response.headers['set-cookie'];
-          const setCookie = setCookieHeaders ? (Array.isArray(setCookieHeaders) ? setCookieHeaders.join(', ') : setCookieHeaders) : undefined;
+          const setCookie = setCookieHeaders
+            ? (Array.isArray(setCookieHeaders) ? setCookieHeaders : [setCookieHeaders])
+            : undefined;
           
           console.log(`[${requestId}] <- CSM Response (${ep} | ${v.name})`, { 
             status: response.status, 
             ok: response.status >= 200 && response.status < 300, 
             duration: `${duration}ms`, 
             hasSetCookie: !!setCookie,
-            cookieCount: setCookieHeaders ? (Array.isArray(setCookieHeaders) ? setCookieHeaders.length : 1) : 0
+            cookieCount: Array.isArray(setCookie) ? setCookie.length : (setCookie ? 1 : 0)
           });
           
           lastResponse = { response, setCookie, variant: `${ep} | ${v.name}` };
