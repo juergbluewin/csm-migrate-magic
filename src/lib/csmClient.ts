@@ -32,98 +32,30 @@ interface CSMCLIQuery {
 
 export class CSMClient {
   private session: CSMSession | null = null;
-  private localProxyUrl = `/csm-proxy`;
-
-  private isPrivateIP(ip: string): boolean {
-    const parts = ip.split('.').map(Number);
-    if (parts.length !== 4) return false;
-    
-    // Check for private IP ranges
-    if (parts[0] === 10) return true; // 10.0.0.0/8
-    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true; // 172.16.0.0/12
-    if (parts[0] === 192 && parts[1] === 168) return true; // 192.168.0.0/16
-    if (parts[0] === 127) return true; // 127.0.0.0/8 (localhost)
-    
-    return false;
-  }
+  private localProxyUrl = '/csm-proxy';
 
   async login({ ipAddress, username, password, verifyTls }: CSMLoginRequest): Promise<boolean> {
-    const baseUrl = `https://${ipAddress}/nbi`;
+    console.log('🔐 CSM Login via local proxy');
     
-    console.log('🔐 CSM Login (nur lokaler Proxy):', {
-      ipAddress,
-      username,
-      verifyTls,
-      timestamp: new Date().toISOString()
+    const response = await fetch(this.localProxyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'login', ipAddress, username, password, verifyTls })
     });
-
-    try {
-      const requestStart = Date.now();
-      const response = await fetch(this.localProxyUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          action: 'login',
-          ipAddress,
-          username,
-          password,
-          verifyTls,
-        }),
-      });
-      const requestDuration = Date.now() - requestStart;
-      console.log('📥 Lokaler Proxy Antwort:', {
-        status: response.status,
-        statusText: response.statusText,
-        duration: `${requestDuration}ms`,
-        ok: response.ok,
-      });
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`Lokaler Proxy-Fehler: ${response.status} ${response.statusText}\n${text}`);
-      }
-      const result = await response.json();
-      console.log('✅ Login-Response (lokaler Proxy):', {
-        ok: result.ok,
-        status: result.status,
-        statusText: result.statusText,
-        hasCookie: !!result.headers?.['set-cookie'] || !!result.headers?.['Set-Cookie'],
-      });
-      if (result.ok) {
-        const setCookieHeader = result.headers?.['set-cookie'] || result.headers?.['Set-Cookie'];
-        
-        // Parse all cookies from Set-Cookie header(s)
-        const cookies: string[] = [];
-        if (setCookieHeader) {
-          const cookieArray = Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader];
-          for (const cookieStr of cookieArray) {
-            // Extract cookie name=value pairs (before first semicolon)
-            const match = cookieStr.match(/^([^=]+)=([^;]+)/);
-            if (match) {
-              cookies.push(`${match[1]}=${match[2]}`);
-            }
-          }
-        }
-        
-        if (cookies.length > 0) {
-          this.session = {
-            cookie: cookies.join('; '),
-            baseUrl,
-          };
-          console.log('✅ Session erstellt:', { 
-            cookieCount: cookies.length,
-            cookiePreview: this.session.cookie.substring(0, 50) + '...'
-          });
-          return true;
-        }
-        throw new Error('Login erfolgreich, aber kein Session-Cookie erhalten');
-      }
-      throw new Error(`CSM Login fehlgeschlagen: ${result.status} ${result.statusText}\n${result.body || 'Keine Details'}`);
-    } catch (error: any) {
-      console.error('❌ Lokaler Proxy Login Fehler:', error);
-      throw error;
+    
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Proxy-Fehler: ${response.status} ${response.statusText}\n${text}`);
     }
+    
+    const result = await response.json();
+    if (!result.ok) {
+      throw new Error(`CSM Login fehlgeschlagen: ${result.status} ${result.statusText}`);
+    }
+    
+    // Session nur als Platzhalter - Cookie-Verwaltung erfolgt im Proxy
+    this.session = { cookie: '', baseUrl: `https://${ipAddress}/nbi` };
+    return true;
   }
 
   async getPolicyObjectsList({ policyObjectType, limit = 100, offset = 0 }: CSMObjectQuery) {
@@ -136,26 +68,33 @@ export class CSMClient {
         <offset>${offset}</offset>
       </getPolicyObjectsListByTypeRequest>`;
 
+    const ipAddress = this.session.baseUrl.replace('https://', '').replace('/nbi', '');
+    return this.request('/configservice/getPolicyObjectsListByType', requestXml);
+  }
+
+  private async request(endpoint: string, body: string) {
+    if (!this.session) throw new Error('Not logged in to CSM');
+    
+    const ipAddress = this.session.baseUrl.replace('https://', '').replace('/nbi', '');
     const response = await fetch(this.localProxyUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'request',
-        ipAddress: this.session.baseUrl.replace('https://', '').replace('/nbi', ''),
-        endpoint: '/configservice/getPolicyObjectsListByType',
-        body: requestXml,
-        cookie: this.session.cookie,
-      }),
+      body: JSON.stringify({ action: 'request', ipAddress, endpoint, body })
     });
-    if (!response.ok) throw new Error(`Lokaler Proxy-Fehler: ${response.status} ${response.statusText}`);
+    
+    if (!response.ok) {
+      throw new Error(`Proxy-Fehler: ${response.status} ${response.statusText}`);
+    }
+    
     const result = await response.json();
-    if (!result.ok) throw new Error(`Fehler beim Abrufen der Policy-Objekte (${result.status}): ${result.statusText}`);
+    if (!result.ok) {
+      throw new Error(`CSM-Fehler ${result.status}: ${result.statusText}`);
+    }
+    
     return result.body;
   }
 
   async getPolicyObject(objectName: string, objectType: 'NetworkPolicyObject' | 'ServicePolicyObject') {
-    if (!this.session) throw new Error('Not logged in to CSM');
-
     const wrapperTag = objectType === 'NetworkPolicyObject' ? 'networkPolicyObject' : 'servicePolicyObject';
     const requestXml = `<?xml version="1.0" encoding="UTF-8"?>
       <getPolicyObjectRequest>
@@ -164,78 +103,30 @@ export class CSMClient {
         </${wrapperTag}>
       </getPolicyObjectRequest>`;
 
-    const response = await fetch(this.localProxyUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'request',
-        ipAddress: this.session.baseUrl.replace('https://', '').replace('/nbi', ''),
-        endpoint: '/configservice/getPolicyObject',
-        body: requestXml,
-        cookie: this.session.cookie,
-      }),
-    });
-    if (!response.ok) throw new Error(`Lokaler Proxy-Fehler: ${response.status} ${response.statusText}`);
-    const result = await response.json();
-    if (!result.ok) throw new Error(`Failed to get policy object: ${result.statusText}`);
-    return result.body;
+    return this.request('/configservice/getPolicyObject', requestXml);
   }
 
   async getPolicyConfigByName(policyName: string, policyType: string = 'DeviceAccessRuleFirewallPolicy') {
-    if (!this.session) throw new Error('Not logged in to CSM');
-
     const requestXml = `<?xml version="1.0" encoding="UTF-8"?>
       <getPolicyConfigByNameRequest>
         <policyName>${policyName}</policyName>
         <policyType>${policyType}</policyType>
       </getPolicyConfigByNameRequest>`;
 
-    const response = await fetch(this.localProxyUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'request',
-        ipAddress: this.session.baseUrl.replace('https://', '').replace('/nbi', ''),
-        endpoint: '/configservice/getPolicyConfigByName',
-        body: requestXml,
-        cookie: this.session.cookie,
-      }),
-    });
-    if (!response.ok) throw new Error(`Lokaler Proxy-Fehler: ${response.status} ${response.statusText}`);
-    const result = await response.json();
-    if (!result.ok) throw new Error(`Failed to get policy config: ${result.statusText}`);
-    return result.body;
+    return this.request('/configservice/getPolicyConfigByName', requestXml);
   }
 
   async getPolicyConfigByDeviceGID(deviceGID: string, policyType: string = 'DeviceAccessRuleFirewallPolicy') {
-    if (!this.session) throw new Error('Not logged in to CSM');
-
     const requestXml = `<?xml version="1.0" encoding="UTF-8"?>
       <getPolicyConfigByDeviceGIDRequest>
         <deviceGID>${deviceGID}</deviceGID>
         <policyType>${policyType}</policyType>
       </getPolicyConfigByDeviceGIDRequest>`;
 
-    const response = await fetch(this.localProxyUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'request',
-        ipAddress: this.session.baseUrl.replace('https://', '').replace('/nbi', ''),
-        endpoint: '/configservice/getPolicyConfigByDeviceGID',
-        body: requestXml,
-        cookie: this.session.cookie,
-      }),
-    });
-    if (!response.ok) throw new Error(`Lokaler Proxy-Fehler: ${response.status} ${response.statusText}`);
-    const result = await response.json();
-    if (!result.ok) throw new Error(`Failed to get policy config by device: ${result.statusText}`);
-    return result.body;
+    return this.request('/configservice/getPolicyConfigByDeviceGID', requestXml);
   }
 
   async execDeviceReadOnlyCLICmds({ deviceIP, command, argument }: CSMCLIQuery) {
-    if (!this.session) throw new Error('Not logged in to CSM');
-
     const requestXml = `<?xml version="1.0" encoding="UTF-8"?>
       <execDeviceReadOnlyCLICmdsRequest>
         <deviceIP>${deviceIP}</deviceIP>
@@ -243,43 +134,20 @@ export class CSMClient {
         ${argument ? `<argument>${argument}</argument>` : ''}
       </execDeviceReadOnlyCLICmdsRequest>`;
 
-    const response = await fetch(this.localProxyUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'request',
-        ipAddress: this.session.baseUrl.replace('https://', '').replace('/nbi', ''),
-        endpoint: '/utilservice/execDeviceReadOnlyCLICmds',
-        body: requestXml,
-        cookie: this.session.cookie,
-      }),
-    });
-    if (!response.ok) throw new Error(`Lokaler Proxy-Fehler: ${response.status} ${response.statusText}`);
-    const result = await response.json();
-    if (!result.ok) throw new Error(`Failed to execute CLI command: ${result.statusText}`);
-    return result.body;
+    return this.request('/utilservice/execDeviceReadOnlyCLICmds', requestXml);
   }
 
   async logout() {
-    if (!this.session) {
-      return;
-    }
-
+    if (!this.session) return;
+    
     const ipAddress = this.session.baseUrl.replace('https://', '').replace('/nbi', '');
-
+    
     try {
-      console.log('🚪 Logout über lokalen Proxy');
-      const response = await fetch(this.localProxyUrl, {
+      await fetch(this.localProxyUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'logout',
-          ipAddress,
-        }),
+        body: JSON.stringify({ action: 'logout', ipAddress })
       });
-      if (response.ok) {
-        console.log('✅ Logout erfolgreich');
-      }
     } catch (error) {
       console.warn('⚠️ Logout-Fehler (ignoriert):', error);
     } finally {

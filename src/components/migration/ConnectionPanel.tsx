@@ -55,7 +55,10 @@ export const ConnectionPanel = ({
       if (success) {
         onStatusChange({ ...connectionStatus, csm: 'connected' });
         addLog('success', 'CSM Verbindung erfolgreich', `Verbunden mit https://${csmConnection.ipAddress}/nbi`);
-        client.logout();
+        
+        // Session sauber schließen nach Test, vermeidet Code 29 bei erneutem Test
+        await client.logout();
+        onStatusChange({ ...connectionStatus, csm: 'disconnected' });
       } else {
         onStatusChange({ ...connectionStatus, csm: 'error' });
         addLog('error', 'CSM Verbindung fehlgeschlagen', 'Login fehlgeschlagen - Benutzername oder Passwort falsch');
