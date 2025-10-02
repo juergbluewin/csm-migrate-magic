@@ -166,14 +166,17 @@ app.post('/csm-proxy', async (req, res) => {
             const setCookie = setCookieHeaders
               ? (Array.isArray(setCookieHeaders) ? setCookieHeaders : [setCookieHeaders])
               : undefined;
+            const bodyText = String(response.data || '');
+            const isLoginResponse = /<\s*loginresponse[\s>]/i.test(bodyText);
             console.log(`[${requestId}] <- CSM Response (HINT ${ep} | ${v.name})`, { 
               status: response.status, 
               ok: response.status >= 200 && response.status < 300, 
               duration: `${duration}ms`, 
               hasSetCookie: !!setCookie,
               cookieCount: Array.isArray(setCookie) ? setCookie.length : (setCookie ? 1 : 0),
+              isLoginResponse,
             });
-            if (setCookie) {
+            if (setCookie && setCookie.length > 0 && isLoginResponse) {
               loginHints.set(ipAddress, { ep, variantName: v.name });
               return res.status(200).json({
                 ok: true,
