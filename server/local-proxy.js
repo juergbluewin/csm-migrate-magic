@@ -132,6 +132,25 @@ app.post('/csm-proxy', async (req, res) => {
 
     console.log(`[${requestId}] CSM Local Proxy ->`, { action, ipAddress, endpoint: endpoint || '/nbi/login', verifyTls, isPrivateIP: isPrivateIP(ipAddress) });
 
+    // Logout-Aktion
+    if (action === 'logout') {
+      return serialize(ipAddress, async () => {
+        const protocol2 = verifyTls === false ? 'http' : 'https';
+        const port2 = verifyTls === false ? ':80' : '';
+        const baseUrl = `${protocol2}://${ipAddress}${port2}/nbi`;
+        const agent = new https.Agent({ rejectUnauthorized: verifyTls !== false });
+
+        console.log(`[${requestId}] 🚪 Logout request for ${ipAddress}`);
+        await cleanupSession(ipAddress, baseUrl, agent);
+
+        return res.json({
+          ok: true,
+          status: 200,
+          statusText: 'Logout erfolgreich',
+        });
+      });
+    }
+
       if (action === 'login') { return await withSingleLogin(ipAddress, async () => {
         const protocol = 'https';
         const port = 443;
@@ -226,9 +245,12 @@ app.post('/csm-proxy', async (req, res) => {
         }
       }
 
-      // Bei 401: genau ein stiller Re-Login mit gemerktem Pfad/XML, danach ein Retry
-      if (response.status === 401 && hint2.loginPath && hint2.loginXml) {
-        console.log(`[${requestId}] 🔄 Got 401 - attempting silent re-login`);
+      // Bei 401 ODER 404 mit loginResponse: genau ein stiller Re-Login mit gemerktem Pfad/XML, danach ein Retry
+      const bodyText1 = String(response.data || '');
+      const looksLikeLoginResponse = /<(?:\w+:)?loginResponse[\s>]/i.test(bodyText1);
+      
+      if ((response.status === 401 || (response.status === 404 && looksLikeLoginResponse)) && hint2.loginPath && hint2.loginXml) {
+        console.log(`[${requestId}] 🔄 Got ${response.status} ${looksLikeLoginResponse ? '(loginResponse)' : ''} - attempting silent re-login`);
         await withSingleLogin(ipAddress, async () => {
           // Erst alte Session sauber beenden
           const baseUrlForCleanup = `${protocol2}://${ipAddress}${port2}${hint2.basePath || ''}`;

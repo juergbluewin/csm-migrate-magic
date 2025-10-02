@@ -574,8 +574,46 @@ export class CSMClient {
     return result.body;
   }
 
-  logout() {
-    this.session = null;
+  async logout() {
+    if (!this.session) {
+      return;
+    }
+
+    const ipAddress = this.session.baseUrl.replace('https://', '').replace('/nbi', '');
+
+    try {
+      if (this.isRunningLocally()) {
+        console.log('🚪 Logout über lokalen Proxy');
+        const response = await fetch(this.localProxyUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'logout',
+            ipAddress,
+          }),
+        });
+        if (response.ok) {
+          console.log('✅ Logout erfolgreich (lokal)');
+        }
+      } else {
+        console.log('🚪 Logout über Cloud-Proxy');
+        const response = await fetch(this.proxyUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'logout',
+            ipAddress,
+          }),
+        });
+        if (response.ok) {
+          console.log('✅ Logout erfolgreich (Cloud)');
+        }
+      }
+    } catch (error) {
+      console.warn('⚠️ Logout-Fehler (ignoriert):', error);
+    } finally {
+      this.session = null;
+    }
   }
 }
 

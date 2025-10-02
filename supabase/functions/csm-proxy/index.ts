@@ -6,7 +6,7 @@ const corsHeaders = {
 };
 
 interface ProxyRequest {
-  action: 'login' | 'request';
+  action: 'login' | 'request' | 'logout';
   ipAddress: string;
   username?: string;
   password?: string;
@@ -49,6 +49,48 @@ serve(async (req) => {
     // Warnung bei privaten IPs
     if (isPrivateIP(ipAddress)) {
       console.warn(`[${requestId}] ⚠️ Private IP detected: ${ipAddress} - Connection will likely fail from cloud environment`);
+    }
+
+    if (action === 'logout') {
+      const baseUrl = `https://${ipAddress}/nbi`;
+      const logoutXml = `<?xml version="1.0" encoding="UTF-8"?>
+<csm:logoutRequest xmlns:csm="csm"/>`;
+      
+      console.log(`[${requestId}] 🚪 Attempting CSM logout to ${baseUrl}/logout`);
+      
+      try {
+        const response = await fetch(`${baseUrl}/logout`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/xml',
+            'Accept': 'application/xml',
+            ...(cookie ? { 'Cookie': cookie } : {}),
+          },
+          body: logoutXml,
+        });
+
+        const responseText = await response.text();
+        
+        return new Response(JSON.stringify({
+          ok: response.ok,
+          status: response.status,
+          statusText: response.statusText,
+          body: responseText,
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 200,
+        });
+      } catch (error: any) {
+        console.log(`[${requestId}] ⚠️ Logout failed (ignored):`, error.message);
+        return new Response(JSON.stringify({
+          ok: true,
+          status: 200,
+          statusText: 'Logout attempted',
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 200,
+        });
+      }
     }
 
     if (action === 'login') {
