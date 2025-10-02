@@ -206,15 +206,25 @@ export const DataPanel = ({
       onServiceObjectsChange(sObjs);
 
       if (allAccessRules.length > 0) {
+        // Determine device name from export selection
+        let deviceName = 'unknown-device';
+        if (exportSelection.deviceIp) {
+          deviceName = exportSelection.deviceIp;
+        } else if (exportSelection.deviceGid) {
+          deviceName = exportSelection.deviceGid.split('-').pop() || exportSelection.deviceGid;
+        } else if (exportSelection.policyName) {
+          deviceName = exportSelection.policyName;
+        }
+        
         const list: AccessList = {
           id: 'acl-1',
-          name: 'Imported ACL',
-          firewall: csmConnection.ipAddress,
+          name: `ACL - ${deviceName}`,
+          firewall: deviceName,
           rules: allAccessRules.map((rule: any, idx: number) => ({
-            id: `${rule.name || `rule-${idx}`}`,
+            id: `${deviceName}-${rule.name || `rule-${idx}`}`,
             policy: rule.policy || 'unknown',
             position: rule.position || idx + 1,
-            name: rule.name || `rule-${idx}`,
+            name: `${deviceName} | ${rule.name || `rule-${idx}`}`,
             source: rule.source || [],
             destination: rule.destination || [],
             services: rule.services || [],
@@ -333,7 +343,7 @@ export const DataPanel = ({
           <Card>
             <CardHeader>
               <CardTitle>Network Objects</CardTitle>
-              <CardDescription>Netzwerk-Objekte aus dem Cisco Security Manager</CardDescription>
+              <CardDescription>Netzwerk-Objekte aus dem Cisco Security Manager (Global)</CardDescription>
             </CardHeader>
             <CardContent>
               <Table>
@@ -342,7 +352,6 @@ export const DataPanel = ({
                     <TableHead>Name</TableHead>
                     <TableHead>Typ</TableHead>
                     <TableHead>Wert</TableHead>
-                    <TableHead>Firewall</TableHead>
                     <TableHead>Beschreibung</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -352,7 +361,6 @@ export const DataPanel = ({
                       <TableCell className="font-medium">{obj.name}</TableCell>
                       <TableCell><Badge>{obj.type}</Badge></TableCell>
                       <TableCell className="font-mono text-sm">{obj.value}</TableCell>
-                      <TableCell>{obj.firewall && <Badge variant="outline">{obj.firewall}</Badge>}</TableCell>
                       <TableCell className="text-muted-foreground">{obj.description}</TableCell>
                     </TableRow>
                   ))}
@@ -366,7 +374,7 @@ export const DataPanel = ({
           <Card>
             <CardHeader>
               <CardTitle>Service Objects</CardTitle>
-              <CardDescription>Service-Objekte aus dem Cisco Security Manager</CardDescription>
+              <CardDescription>Service-Objekte aus dem Cisco Security Manager (Global)</CardDescription>
             </CardHeader>
             <CardContent>
               <Table>
@@ -397,7 +405,7 @@ export const DataPanel = ({
           <Card>
             <CardHeader>
               <CardTitle>Access Lists</CardTitle>
-              <CardDescription>Access Control Lists aus dem Cisco Security Manager</CardDescription>
+              <CardDescription>Access Control Lists aus dem Cisco Security Manager (Device-spezifisch)</CardDescription>
             </CardHeader>
             <CardContent>
               <Table>
