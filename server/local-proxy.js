@@ -108,11 +108,36 @@ app.post('/csm-proxy', async (req, res) => {
         // Kanonisches Login-XML gemäß offiziellem Cisco CSM API Spec
         const loginXml = `<?xml version="1.0" encoding="UTF-8"?>\n<csm:loginRequest xmlns:csm="csm">\n  <protVersion>1.0</protVersion>\n  <username>${username}</username>\n  <password>${password}</password>\n</csm:loginRequest>`;
 
-        // Bereits eingeloggt? Discovery überspringen
+        // WICHTIG: Bei neuem Login-Versuch alte Session explizit beenden
         if (hasSession(ipAddress, baseUrl)) {
-          loginHints.set(ipAddress, { protocol, port, basePath: '/nbi', loginPath: '/nbi/login', loginXml });
-          return res.status(200).json({ ok: true, reused: true });
+          console.log(`[${requestId}] 🔄 Existing session found - logging out first`);
+          try {
+            const logoutXml = '<?xml version="1.0" encoding="UTF-8"?>\n<csm:logoutRequest xmlns:csm="csm"/>';
+            const cookies = cookieHeaderFor(ipAddress, `${baseUrl}/logout`);
+            await axios.post(`${baseUrl}/logout`, logoutXml, {
+              headers: {
+                'Content-Type': 'application/xml',
+                'Accept': 'application/xml',
+                'User-Agent': 'curl/8.5.0',
+                ...(cookies ? { 'Cookie': cookies } : {}),
+              },
+              httpsAgent: agent,
+              timeout: 10000,
+              validateStatus: () => true,
+            });
+          } catch (e) {
+            console.log(`[${requestId}] ⚠️ Logout failed (ignored):`, e.message);
+          }
         }
+
+        // Cookie-Jar für diese IP komplett leeren
+        const allCookies = jar.getCookiesSync(baseUrl);
+        for (const cookie of allCookies) {
+          try {
+            jar.setCookieSync(`${cookie.key}=; Max-Age=0; Path=${cookie.path}`, baseUrl);
+          } catch {}
+        }
+        console.log(`[${requestId}] 🧹 Cleared ${allCookies.length} cookies for ${ipAddress}`);
 
         const url = `${baseUrl}/login`;
         const response = await axios.post(url, loginXml, {
