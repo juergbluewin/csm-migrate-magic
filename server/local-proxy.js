@@ -229,9 +229,65 @@ app.post('/csm-proxy', async (req, res) => {
           lastResponse = { response, setCookie, variant: `${ep} | ${v.name}` };
           const bodyText = String(response.data || '');
           const validationError = /validation errors|Cannot find the declaration/i.test(bodyText);
+          const isLoginResponse = /<\s*loginresponse[\s>]/i.test(bodyText);
+
+          // If we got the app server cookie (asCookie) but not a proper loginresponse,
+          // attempt the canonical two-step login to /securityservice/login using asCookie
+          if (!isLoginResponse && setCookie && setCookie.length > 0) {
+            const asCookieHeader = setCookie.find(c => /^asCookie=/.test(c));
+            if (asCookieHeader) {
+              try {
+                const asCookiePair = asCookieHeader.split(';')[0];
+                const canonicalLoginXml = `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest xmlns="http://www.cisco.com/security/manager/nbi">\n  <protVersion>1.0</protVersion>\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`;
+                const twoStepStart = Date.now();
+                const secResp = await axios.post(`${baseUrl}/securityservice/login`, canonicalLoginXml, {
+                  headers: {
+                    'Content-Type': 'text/xml',
+                    'Accept': 'application/xml',
+                    'User-Agent': 'curl/8.5.0',
+                    'Cookie': asCookiePair,
+                  },
+                  httpsAgent: agent,
+                  timeout: 30000,
+                  responseType: 'text',
+                  validateStatus: () => true,
+                  maxRedirects: 0,
+                  proxy: false,
+                });
+                const twoStepDur = Date.now() - twoStepStart;
+                const secSetCookieHeaders = secResp.headers['set-cookie'];
+                const secSetCookie = secSetCookieHeaders
+                  ? (Array.isArray(secSetCookieHeaders) ? secSetCookieHeaders : [secSetCookieHeaders])
+                  : [];
+                const secBodyText = String(secResp.data || '');
+                const secIsLoginResponse = /<\s*loginresponse[\s>]/i.test(secBodyText);
+                console.log(`[${requestId}] <- Two-step /securityservice/login`, {
+                  status: secResp.status,
+                  ok: secResp.status >= 200 && secResp.status < 300,
+                  duration: `${twoStepDur}ms`,
+                  hasSetCookie: secSetCookie.length > 0,
+                  cookieCount: secSetCookie.length,
+                  secIsLoginResponse
+                });
+                if (secSetCookie.length > 0 && secIsLoginResponse) {
+                  loginHints.set(ipAddress, { ep: '/securityservice/login', variantName: 'uri-ns-protVersion-first (2-step)' });
+                  return res.status(200).json({
+                    ok: true,
+                    status: secResp.status,
+                    statusText: secResp.statusText,
+                    body: secResp.data,
+                    headers: { 'set-cookie': [...setCookie, ...secSetCookie] },
+                    variant: `${ep} | ${v.name} + 2-step`,
+                  });
+                }
+              } catch (e) {
+                console.log(`[${requestId}] Two-step attempt failed:`, e?.message || e);
+              }
+            }
+          }
           
-          // Success: any status with Set-Cookie (handles 3xx login redirects)
-          if (setCookie && setCookie.length > 0) {
+          // Success only if we have a proper loginresponse and cookies
+          if (setCookie && setCookie.length > 0 && isLoginResponse) {
             loginHints.set(ipAddress, { ep, variantName: v.name });
             return res.status(200).json({
               ok: true,
