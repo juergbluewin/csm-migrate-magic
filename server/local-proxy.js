@@ -483,7 +483,8 @@ app.post('/csm-proxy', async (req, res) => {
         headers: { 'set-cookie': setCookie },
         variant,
       });
-    });
+      });
+    }
 
     if (action === 'request' && endpoint) {
       const resolvedEndpoint = resolvePath(ipAddress, endpoint);
