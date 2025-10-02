@@ -47,10 +47,10 @@ app.post('/csm-proxy', async (req, res) => {
     console.log(`[${requestId}] CSM Local Proxy ->`, { action, ipAddress, endpoint: endpoint || '/nbi/login', verifyTls, isPrivateIP: isPrivateIP(ipAddress) });
 
     if (action === 'login') {
-      // Prioritize likely endpoints, deprioritize /userservice/login (which returned 401 "No session")
+      // Prioritize /login first (matches working Python example)
       const endpoints = [
-        '/securityservice/login',
         '/login',
+        '/securityservice/login',
         '/auth/login',
         '/userservice/login'
       ];
@@ -151,6 +151,8 @@ app.post('/csm-proxy', async (req, res) => {
             timeout: 30000,
             responseType: 'text',
             validateStatus: () => true,
+            maxRedirects: 0,
+            proxy: false,
           });
           const duration = Date.now() - start;
           
@@ -170,8 +172,8 @@ app.post('/csm-proxy', async (req, res) => {
           const bodyText = String(response.data || '');
           const validationError = /validation errors|Cannot find the declaration/i.test(bodyText);
           
-          // Success: 2xx with Set-Cookie
-          if (response.status >= 200 && response.status < 300 && setCookie) {
+          // Success: any status with Set-Cookie (handles 3xx login redirects)
+          if (setCookie) {
             return res.status(200).json({
               ok: true,
               status: response.status,
@@ -217,6 +219,8 @@ app.post('/csm-proxy', async (req, res) => {
         timeout: 30000,
         responseType: 'text',
         validateStatus: () => true,
+        maxRedirects: 0,
+        proxy: false,
       });
       const duration = Date.now() - start;
       console.log(`[${requestId}] <- API Response`, { status: response.status, ok: response.status >= 200 && response.status < 300, duration: `${duration}ms` });
