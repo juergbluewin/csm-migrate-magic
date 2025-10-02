@@ -131,8 +131,9 @@ export class CSMClient {
               cookie: cookies.join('; '),
               baseUrl,
             };
-            console.log('✅ Session erstellt:', { 
-              cookieCount: cookies.length, 
+            console.log('✅ Session erstellt (lokal):', { 
+              cookieCount: cookies.length,
+              cookiePreview: this.session.cookie.substring(0, 50) + '...',
               variant: result.variant 
             });
             return true;
@@ -257,9 +258,10 @@ export class CSMClient {
             cookie: cookies.join('; '),
             baseUrl
           };
-          console.log('✅ CSM Login erfolgreich!', {
+          console.log('✅ CSM Login erfolgreich (Proxy)!', {
             hasSession: !!this.session,
             cookieCount: cookies.length,
+            cookiePreview: this.session.cookie.substring(0, 50) + '...',
             variant: result.variant,
             baseUrl
           });

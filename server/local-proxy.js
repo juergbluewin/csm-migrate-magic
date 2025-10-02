@@ -208,7 +208,7 @@ app.post('/csm-proxy', async (req, res) => {
           });
           const duration = Date.now() - start;
           
-          // Parse all Set-Cookie headers properly
+          // Parse all Set-Cookie headers properly - keep as array!
           const setCookieHeaders = response.headers['set-cookie'];
           const setCookie = setCookieHeaders
             ? (Array.isArray(setCookieHeaders) ? setCookieHeaders : [setCookieHeaders])
@@ -219,7 +219,8 @@ app.post('/csm-proxy', async (req, res) => {
             ok: response.status >= 200 && response.status < 300, 
             duration: `${duration}ms`, 
             hasSetCookie: !!setCookie,
-            cookieCount: Array.isArray(setCookie) ? setCookie.length : (setCookie ? 1 : 0)
+            cookieCount: Array.isArray(setCookie) ? setCookie.length : (setCookie ? 1 : 0),
+            cookies: setCookie
           });
           
           lastResponse = { response, setCookie, variant: `${ep} | ${v.name}` };
@@ -227,7 +228,7 @@ app.post('/csm-proxy', async (req, res) => {
           const validationError = /validation errors|Cannot find the declaration/i.test(bodyText);
           
           // Success: any status with Set-Cookie (handles 3xx login redirects)
-          if (setCookie) {
+          if (setCookie && setCookie.length > 0) {
             loginHints.set(ipAddress, { ep, variantName: v.name });
             return res.status(200).json({
               ok: true,
