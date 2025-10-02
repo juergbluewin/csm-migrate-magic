@@ -105,8 +105,8 @@ app.post('/csm-proxy', async (req, res) => {
         const baseUrl = `${protocol}://${ipAddress}:${port}/nbi`;
         const jar = jarFor(ipAddress);
 
-        // Kanonisches Login-XML
-        const loginXml = `<?xml version="1.0" encoding="UTF-8"?>\n<loginRequest xmlns="http://www.cisco.com/security/manager/nbi">\n  <protVersion>1.0</protVersion>\n  <username>${username}</username>\n  <password>${password}</password>\n</loginRequest>`;
+        // Kanonisches Login-XML gemäß offiziellem Cisco CSM API Spec
+        const loginXml = `<?xml version="1.0" encoding="UTF-8"?>\n<csm:loginRequest xmlns:csm="csm">\n  <protVersion>1.0</protVersion>\n  <username>${username}</username>\n  <password>${password}</password>\n</csm:loginRequest>`;
 
         // Bereits eingeloggt? Discovery überspringen
         if (hasSession(ipAddress, baseUrl)) {
@@ -137,7 +137,7 @@ app.post('/csm-proxy', async (req, res) => {
         }
 
         const bodyText = String(response.data || '');
-        const isLoginResponse = /<\s*loginresponse[\s>]/i.test(bodyText);
+        const isLoginResponse = /<(?:csm:)?loginResponse[\s>]/i.test(bodyText);
         const hasAsCookie = setCookies.some(c => /^asCookie=/.test(c));
 
         if (response.status === 200 && (isLoginResponse || hasAsCookie)) {
