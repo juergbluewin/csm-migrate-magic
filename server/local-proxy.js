@@ -34,6 +34,8 @@ function isPrivateIP(ip) {
   return false;
 }
 
+const loginHints = new Map();
+
 app.post('/csm-proxy', async (req, res) => {
   const { action, ipAddress, username, password, verifyTls, endpoint, body, cookie } = req.body || {};
   const requestId = Math.random().toString(36).slice(2, 10);
@@ -137,6 +139,54 @@ app.post('/csm-proxy', async (req, res) => {
       ];
 
       let lastResponse;
+      // Try hinted endpoint/variant first for this IP
+      const hint = loginHints.get(ipAddress);
+      if (hint) {
+        try {
+          const v = variants.find(x => x.name === hint.variantName);
+          const ep = hint.ep;
+          if (v && ep) {
+            const start = Date.now();
+            const url = `${baseUrl}${ep}`;
+            const response = await axios.post(url, v.xml, {
+              headers: { 
+                'Content-Type': v.contentType, 
+                'Accept': 'application/xml',
+                'User-Agent': 'curl/8.5.0'
+              },
+              httpsAgent: agent,
+              timeout: 30000,
+              responseType: 'text',
+              validateStatus: () => true,
+              maxRedirects: 0,
+              proxy: false,
+            });
+            const duration = Date.now() - start;
+            const setCookieHeaders = response.headers['set-cookie'];
+            const setCookie = setCookieHeaders ? (Array.isArray(setCookieHeaders) ? setCookieHeaders.join(', ') : setCookieHeaders) : undefined;
+            console.log(`[${requestId}] <- CSM Response (HINT ${ep} | ${v.name})`, { 
+              status: response.status, 
+              ok: response.status >= 200 && response.status < 300, 
+              duration: `${duration}ms`, 
+              hasSetCookie: !!setCookie,
+              cookieCount: setCookieHeaders ? (Array.isArray(setCookieHeaders) ? setCookieHeaders.length : 1) : 0,
+            });
+            if (setCookie) {
+              loginHints.set(ipAddress, { ep, variantName: v.name });
+              return res.status(200).json({
+                ok: true,
+                status: response.status,
+                statusText: response.statusText,
+                body: response.data,
+                headers: { 'set-cookie': setCookie },
+                variant: `${ep} | ${v.name} (hint)`,
+              });
+            }
+          }
+        } catch (e) {
+          console.log(`[${requestId}] Hint login attempt failed, falling back to full scan`);
+        }
+      }
       for (const ep of endpoints) {
         for (const v of variants) {
           const start = Date.now();
@@ -174,6 +224,7 @@ app.post('/csm-proxy', async (req, res) => {
           
           // Success: any status with Set-Cookie (handles 3xx login redirects)
           if (setCookie) {
+            loginHints.set(ipAddress, { ep, variantName: v.name });
             return res.status(200).json({
               ok: true,
               status: response.status,
@@ -213,6 +264,7 @@ app.post('/csm-proxy', async (req, res) => {
         headers: {
           'Content-Type': 'application/xml',
           'Accept': 'application/xml',
+          'User-Agent': 'curl/8.5.0',
           ...(cookie ? { 'Cookie': cookie } : {}),
         },
         httpsAgent: agent,
