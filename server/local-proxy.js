@@ -26,7 +26,7 @@ app.use(express.json({ limit: '2mb' }));
 
 // Session-Speicher: IP -> { cookie, baseUrl, lastUsed }
 const sessions = new Map();
-const loginHints = new Map(); // IP -> { basePath, expiresAt }
+const loginHints = new Map(); // IP -> { baseUrl, expiresAt }
 const serializeMap = new Map(); // IP -> Promise chain
 const inFlightLogin = new Map(); // IP -> Promise
 
@@ -119,11 +119,13 @@ app.post('/csm-proxy', async (req, res) => {
   return serialize(ipAddress, async () => {
     try {
       // Logout
-      if (action === 'logout') {
-        console.log(`[${requestId}] 🚪 Logout for ${ipAddress}`);
-        await cleanupSession(ipAddress, baseUrl, agent);
-        return res.json({ ok: true, status: 200, statusText: 'Logged out', body: '<logout/>' });
-      }
+        if (action === 'logout') {
+          console.log(`[${requestId}] 🚪 Logout for ${ipAddress}`);
+          const hint = loginHints.get(ipAddress);
+          const logoutBase = hint?.baseUrl || baseUrl;
+          await cleanupSession(ipAddress, logoutBase, agent);
+          return res.json({ ok: true, status: 200, statusText: 'Logged out', body: '<logout/>' });
+        }
 
       // Login
       if (action === 'login') {
@@ -139,7 +141,14 @@ app.post('/csm-proxy', async (req, res) => {
         }
 
         return withSingleLogin(ipAddress, async () => {
-          // Login-XML gemäß Cisco CSM NBI API Spec v2.4 (Figure 11, Page 36)
+          // Endpoint-Discovery: mehrere Kandidaten testen und Basis-URL speichern
+          const candidates = [
+            `https://${ipAddress}:443/nbi/login`,
+            `https://${ipAddress}/nbi/login`,
+            `http://${ipAddress}:1741/nbi/login`,
+            `https://${ipAddress}:1741/nbi/login`,
+          ];
+
           const loginXml = `<?xml version="1.0" encoding="UTF-8"?>
 <csm:loginRequest xmlns:csm="csm">
   <csm:protVersion>1.0</csm:protVersion>
@@ -148,155 +157,77 @@ app.post('/csm-proxy', async (req, res) => {
   <csm:password>${password}</csm:password>
 </csm:loginRequest>`;
 
-          console.log(`[${requestId}] 🔐 Attempting login to ${baseUrl}/login`);
-          
-          // Bei neuem Login alte Session cleanup
-          await cleanupSession(ipAddress, baseUrl, agent);
+          let chosenBase = null;
+          let resp = null;
+          let bodyText = '';
 
-          const response = await axios.post(`${baseUrl}/login`, loginXml, {
-            headers: {
-              'Content-Type': 'application/xml',
-              'Accept': 'application/xml',
-            },
-            httpsAgent: agent,
-            timeout: 30000,
-            validateStatus: () => true,
-          });
+          for (const url of candidates) {
+            const currentBase = url.replace(/\/login$/, '');
+            // alte Session auf dem Kandidaten bereinigen
+            await cleanupSession(ipAddress, currentBase, agent);
 
-          // Set-Cookie Headers zusammenführen
-          const setCookieHeaders = response.headers['set-cookie'] || [];
-          const setCookies = Array.isArray(setCookieHeaders) ? setCookieHeaders : (setCookieHeaders ? [setCookieHeaders] : []);
-          
-          const cookieParts = [];
-          for (const c of setCookies) {
-            const match = /^([^=]+)=([^;]+)/.exec(c);
-            if (match) cookieParts.push(`${match[1]}=${match[2]}`);
-          }
-          const mergedCookie = cookieParts.join('; ');
-
-          const bodyText = String(response.data || '');
-          
-          console.log(`[CSM][LOGIN] ${ipAddress} HTTP: ${response.status}, Has Error: ${/<error>/.test(bodyText)}`);
-          
-          // HTTP 404 bedeutet: NBI Service nicht verfügbar
-          if (response.status === 404) {
-            console.error(`[${requestId}] ❌ 404 Not Found - CSM NBI Service nicht verfügbar auf ${baseUrl}/login`);
-            return res.status(503).json({
-              ok: false,
-              status: 503,
-              statusText: 'CSM NBI Service nicht verfügbar',
-              body: 'Der CSM Northbound Interface (NBI) Service ist nicht erreichbar.\n\n' +
-                    'Mögliche Ursachen:\n' +
-                    '1. NBI ist nicht aktiviert: Administration → License → Northbound Interface\n' +
-                    '2. CSM Server läuft nicht oder ist nicht erreichbar\n' +
-                    '3. Falsche IP-Adresse oder Port\n' +
-                    '4. Firewall blockiert Port 443\n\n' +
-                    'Bitte prüfen Sie:\n' +
-                    '- CSM Web-GUI erreichbar unter https://' + ipAddress + '\n' +
-                    '- NBI-Lizenz aktiviert in CSM\n' +
-                    '- CSM-Logs unter $CSM_HOME/log/'
-            });
-          }
-          
-          // Fehlercode 29 oder Login-Fehler erkennen
-          if (/<error>\s*<code>\s*29\s*<\/code>/i.test(bodyText)) {
-            console.warn(`[CSM][CODE29] ${ipAddress} session conflict - user already logged in`);
-            await cleanupSession(ipAddress, baseUrl, agent);
-            await new Promise(resolve => setTimeout(resolve, 500));
-            
-            // Retry mit neuem Request
-            const retryLoginXml = `<?xml version="1.0" encoding="UTF-8"?>
-<csm:loginRequest xmlns:csm="csm">
-  <csm:protVersion>1.0</csm:protVersion>
-  <csm:reqId>${requestId}-retry</csm:reqId>
-  <csm:userName>${username}</csm:userName>
-  <csm:password>${password}</csm:password>
-</csm:loginRequest>`;
-            
-            const retryResponse = await axios.post(`${baseUrl}/login`, retryLoginXml, {
-              headers: { 'Content-Type': 'application/xml', 'Accept': 'application/xml' },
-              httpsAgent: agent,
-              timeout: 30000,
-              validateStatus: () => true,
-            });
-            
-            const retryCookies = retryResponse.headers['set-cookie'] || [];
-            const retryArr = Array.isArray(retryCookies) ? retryCookies : (retryCookies ? [retryCookies] : []);
-            const retryParts = [];
-            for (const c of retryArr) {
-              const match = /^([^=]+)=([^;]+)/.exec(c);
-              if (match) retryParts.push(`${match[1]}=${match[2]}`);
-            }
-            const retryMerged = retryParts.join('; ');
-            const retryBodyText = String(retryResponse.data || '');
-            
-            if (retryResponse.status === 200 && !/<error>/i.test(retryBodyText)) {
-              const timeoutMatch = retryBodyText.match(/<sessionTimeoutInMins>(\d+)<\/sessionTimeoutInMins>/i);
-              const mins = timeoutMatch ? parseInt(timeoutMatch[1], 10) : 30;
-              const expiresAt = Date.now() + mins * 60 * 1000;
-              
-              sessions.set(ipAddress, { cookie: retryMerged, baseUrl, lastUsed: Date.now() });
-              loginHints.set(ipAddress, { basePath: '/nbi', expiresAt });
-              
-              console.log(`[${requestId}] ✅ Login successful after retry, session timeout: ${mins}min`);
-              return res.status(200).json({
-                ok: true,
-                status: 200,
-                statusText: 'OK',
-                body: retryResponse.data,
+            try {
+              const r = await axios.post(url, loginXml, {
+                headers: { 'Content-Type': 'application/xml', 'Accept': 'application/xml' },
+                httpsAgent: agent,
+                timeout: 30000,
+                validateStatus: () => true,
               });
+              resp = r;
+              bodyText = String(r.data || '');
+              const hasError = /<\s*error\b/i.test(bodyText);
+              const ok = r.status >= 200 && r.status < 300 && !hasError;
+
+              // Code 29: Session-Lock -> bereinigen und melden
+              if (/<error>\s*<code>\s*29\s*<\/code>/i.test(bodyText)) {
+                console.warn(`[CSM][CODE29] ${ipAddress} session conflict during login`);
+                await cleanupSession(ipAddress, currentBase, agent);
+                loginHints.delete(ipAddress);
+                return res.status(423).json({
+                  ok: false,
+                  status: 423,
+                  statusText: 'CSM session locked (Code 29)',
+                  body: bodyText,
+                });
+              }
+
+              if (ok) {
+                // Cookies zusammenführen
+                const setCookieHeaders = r.headers['set-cookie'] || [];
+                const setCookies = Array.isArray(setCookieHeaders) ? setCookieHeaders : (setCookieHeaders ? [setCookieHeaders] : []);
+                const cookieParts = [];
+                for (const c of setCookies) {
+                  const match = /^([^=]+)=([^;]+)/.exec(c);
+                  if (match) cookieParts.push(`${match[1]}=${match[2]}`);
+                }
+                const mergedCookie = cookieParts.join('; ');
+
+                const timeoutMatch = bodyText.match(/<sessionTimeoutInMins>(\d+)<\/sessionTimeoutInMins>/i);
+                const mins = timeoutMatch ? parseInt(timeoutMatch[1], 10) : 30;
+                const expiresAt = Date.now() + mins * 60 * 1000;
+
+                sessions.set(ipAddress, { cookie: mergedCookie, baseUrl: currentBase, lastUsed: Date.now() });
+                loginHints.set(ipAddress, { baseUrl: currentBase, expiresAt });
+
+                console.log(`[${requestId}] ✅ CSM Login via ${currentBase}/login (timeout ${mins}min)`);
+                return res.status(200).json({
+                  ok: true,
+                  status: 200,
+                  statusText: 'OK',
+                  body: bodyText,
+                });
+              }
+            } catch (e) {
+              resp = e?.response || resp;
+              bodyText = String(resp?.data || e?.message || '');
             }
-            
-            return res.status(423).json({
-              ok: false,
-              status: 423,
-              statusText: 'CSM login error - session locked',
-              body: retryBodyText,
-            });
-          }
-          
-          // Andere Login-Fehler
-          if (/<error>/i.test(bodyText)) {
-            return res.status(423).json({
-              ok: false,
-              status: 423,
-              statusText: 'CSM login error',
-              body: bodyText,
-            });
           }
 
-          // Session-Timeout aus Response auslesen
-          const timeoutMatch = bodyText.match(/<sessionTimeoutInMins>(\d+)<\/sessionTimeoutInMins>/i);
-          const mins = timeoutMatch ? parseInt(timeoutMatch[1], 10) : 30;
-          const expiresAt = Date.now() + mins * 60 * 1000;
-
-          // Erfolgreicher Login
-          if (response.status === 200 && /<(?:csm:)?loginResponse[\s>]/i.test(bodyText)) {
-            sessions.set(ipAddress, { cookie: mergedCookie, baseUrl, lastUsed: Date.now() });
-            loginHints.set(ipAddress, { basePath: '/nbi', expiresAt });
-            
-            console.log(`[${requestId}] ✅ Login successful, session timeout: ${mins}min`);
-            return res.status(200).json({
-              ok: true,
-              status: 200,
-              statusText: 'OK',
-              body: response.data,
-            });
-          }
-
-          // Andere HTTP-Fehler detailliert behandeln
-          let errorDetail = `HTTP ${response.status}: ${response.statusText || 'Unknown'}`;
-          if (response.status === 401 || response.status === 403) {
-            errorDetail = 'Authentifizierung fehlgeschlagen - Benutzername oder Passwort falsch';
-          } else if (response.status >= 500) {
-            errorDetail = `CSM Server Fehler (${response.status}) - Server möglicherweise überlastet`;
-          }
-          
-          console.error(`[${requestId}] ❌ Login failed: ${errorDetail}`);
-          return res.status(423).json({
+          console.warn(`[${requestId}] ❌ CSM NBI nicht gefunden, letzte Antwort: HTTP ${resp?.status || 'n/a'}`);
+          return res.status(503).json({
             ok: false,
-            status: response.status,
-            statusText: errorDetail,
+            status: resp?.status || 503,
+            statusText: 'CSM NBI Service nicht verfügbar',
             body: bodyText,
           });
         });
@@ -304,81 +235,38 @@ app.post('/csm-proxy', async (req, res) => {
 
       // Request
       if (action === 'request' && endpoint) {
-        const path = resolvePath(ipAddress, endpoint);
-        const url = `${baseUrl}${path.replace(/^\/nbi/, '')}`;
-        
-        // Cookie aus Session holen
+        const hint = loginHints.get(ipAddress);
+        if (!hint?.baseUrl) return res.status(401).json({ ok: false, status: 401, statusText: 'Keine Session' });
+
+        const endpointPath = endpoint.startsWith('/nbi/') ? endpoint.replace(/^\/nbi/, '') : endpoint;
+        const url = `${hint.baseUrl}${endpointPath.startsWith('/') ? '' : '/'}${endpointPath}`;
+
         const session = sessions.get(ipAddress);
         const cookieStr = session?.cookie || '';
-        
-        const doRequest = async () => axios.post(url, body, {
+
+        const send = () => axios.post(url, body, {
+          httpsAgent: agent,
           headers: {
             'Content-Type': 'application/xml',
             'Accept': 'application/xml',
             ...(cookieStr ? { 'Cookie': cookieStr } : {}),
           },
-          httpsAgent: agent,
-          timeout: 30000,
           validateStatus: () => true,
+          responseType: 'text',
+          timeout: 30000,
         });
 
-        let resp, text;
-        try {
-          resp = await doRequest();
-          text = String(resp.data || '');
-        } catch (e) {
-          resp = e.response;
-          text = String(resp?.data || '');
-        }
+        let r = await send();
+        const text = String(r.data || '');
 
-        // Session-Timeout aktualisieren
-        if (session && resp) {
-          session.lastUsed = Date.now();
-          sessions.set(ipAddress, session);
+        if ((r.status === 404 || r.status === 200) && /<\s*code>\s*29\s*<\/code>/i.test(text)) {
+          await cleanupSession(ipAddress, hint.baseUrl, agent);
+          loginHints.delete(ipAddress);
+          return res.status(423).json({ ok: false, status: 423, statusText: 'CSM NB API session locked (29)', body: text });
         }
+        if (r.status >= 400) return res.status(r.status).json({ ok: false, status: r.status, statusText: 'Proxy request error', body: text });
 
-        // Fehlercode 29 erkennen
-        const code29 = /<error>\s*<code>\s*29\s*<\/code>/i.test(text);
-        
-        if (code29) {
-          console.warn(`[CSM][CODE29] ${ipAddress} session conflict during request`);
-          await cleanupSession(ipAddress, baseUrl, agent);
-          return res.status(423).json({
-            ok: false,
-            status: 423,
-            statusText: 'CSM session locked (Code 29)',
-            body: text,
-          });
-        }
-
-        // 401 behandeln (nicht eingeloggt)
-        if (resp?.status === 401) {
-          console.warn(`[${requestId}] 401 Unauthorized - session expired`);
-          return res.status(401).json({
-            ok: false,
-            status: 401,
-            statusText: 'Unauthorized - please login again',
-            body: text,
-          });
-        }
-
-        if (!resp || resp.status >= 400) {
-          return res.status(resp?.status || 500).json({
-            ok: false,
-            status: resp?.status || 500,
-            statusText: resp?.statusText || 'Proxy request error',
-            body: text,
-          });
-        }
-
-        console.log(`[${requestId}] <- ${path} (${resp.status})`);
-        
-        return res.status(200).json({
-          ok: true,
-          status: 200,
-          statusText: 'OK',
-          body: text,
-        });
+        return res.status(200).json({ ok: true, status: 200, statusText: 'OK', body: text });
       }
 
       return res.status(400).json({ error: 'Invalid action' });
@@ -405,7 +293,8 @@ app.post('/proxy/test', async (req, res) => {
   }
 
   const agent = new https.Agent({ rejectUnauthorized: verifyTls === true });
-  const baseUrl = `https://${ipAddress}/nbi`;
+  const hint = loginHints.get(ipAddress);
+  const baseUrl = hint?.baseUrl || `https://${ipAddress}/nbi`;
   const url = `${baseUrl}/configservice/getVersion`;
   
   // Cookie aus Session holen
