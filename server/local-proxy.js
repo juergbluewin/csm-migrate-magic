@@ -36,7 +36,13 @@ async function cleanupSession(ipAddress, baseUrl, agent) {
   
   if (session?.cookie) {
     try {
-      const logoutXml = '<?xml version="1.0" encoding="UTF-8"?><csm:logoutRequest xmlns:csm="csm"/>';
+      // Logout gemäß Cisco CSM NBI API Spec v2.4 (Figure 16, Page 40)
+      const logoutXml = `<?xml version="1.0" encoding="UTF-8"?>
+<csm:logoutRequest xmlns:csm="csm">
+  <csm:protVersion>1.0</csm:protVersion>
+  <csm:reqId>${Math.random().toString(36).slice(2, 10)}</csm:reqId>
+</csm:logoutRequest>`;
+      
       await axios.post(`${baseUrl}/logout`, logoutXml, {
         headers: {
           'Content-Type': 'application/xml',
@@ -133,11 +139,13 @@ app.post('/csm-proxy', async (req, res) => {
         }
 
         return withSingleLogin(ipAddress, async () => {
-          // Login-XML gemäß Cisco CSM API Spec
+          // Login-XML gemäß Cisco CSM NBI API Spec v2.4 (Figure 11, Page 36)
           const loginXml = `<?xml version="1.0" encoding="UTF-8"?>
 <csm:loginRequest xmlns:csm="csm">
-  <userName>${username}</userName>
-  <password>${password}</password>
+  <csm:protVersion>1.0</csm:protVersion>
+  <csm:reqId>${requestId}</csm:reqId>
+  <csm:userName>${username}</csm:userName>
+  <csm:password>${password}</csm:password>
 </csm:loginRequest>`;
 
           console.log(`[${requestId}] 🔐 Attempting login to ${baseUrl}/login`);
@@ -176,7 +184,16 @@ app.post('/csm-proxy', async (req, res) => {
             await cleanupSession(ipAddress, baseUrl, agent);
             await new Promise(resolve => setTimeout(resolve, 500));
             
-            const retryResponse = await axios.post(`${baseUrl}/login`, loginXml, {
+            // Retry mit neuem Request
+            const retryLoginXml = `<?xml version="1.0" encoding="UTF-8"?>
+<csm:loginRequest xmlns:csm="csm">
+  <csm:protVersion>1.0</csm:protVersion>
+  <csm:reqId>${requestId}-retry</csm:reqId>
+  <csm:userName>${username}</csm:userName>
+  <csm:password>${password}</csm:password>
+</csm:loginRequest>`;
+            
+            const retryResponse = await axios.post(`${baseUrl}/login`, retryLoginXml, {
               headers: { 'Content-Type': 'application/xml', 'Accept': 'application/xml' },
               httpsAgent: agent,
               timeout: 30000,
@@ -368,7 +385,14 @@ app.post('/proxy/test', async (req, res) => {
   const cookie = session?.cookie || '';
 
   try {
-    const r = await axios.post(url, '<?xml version="1.0" encoding="UTF-8"?><csm:getVersionRequest xmlns:csm="csm"/>', {
+    // Test-Request gemäß Cisco CSM NBI API Spec
+    const testXml = `<?xml version="1.0" encoding="UTF-8"?>
+<csm:getVersionRequest xmlns:csm="csm">
+  <csm:protVersion>1.0</csm:protVersion>
+  <csm:reqId>${requestId}</csm:reqId>
+</csm:getVersionRequest>`;
+    
+    const r = await axios.post(url, testXml, {
       httpsAgent: agent,
       headers: { 
         'Content-Type': 'application/xml', 
