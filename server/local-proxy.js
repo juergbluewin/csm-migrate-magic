@@ -178,6 +178,26 @@ app.post('/csm-proxy', async (req, res) => {
           
           console.log(`[CSM][LOGIN] ${ipAddress} HTTP: ${response.status}, Has Error: ${/<error>/.test(bodyText)}`);
           
+          // HTTP 404 bedeutet: NBI Service nicht verfügbar
+          if (response.status === 404) {
+            console.error(`[${requestId}] ❌ 404 Not Found - CSM NBI Service nicht verfügbar auf ${baseUrl}/login`);
+            return res.status(503).json({
+              ok: false,
+              status: 503,
+              statusText: 'CSM NBI Service nicht verfügbar',
+              body: 'Der CSM Northbound Interface (NBI) Service ist nicht erreichbar.\n\n' +
+                    'Mögliche Ursachen:\n' +
+                    '1. NBI ist nicht aktiviert: Administration → License → Northbound Interface\n' +
+                    '2. CSM Server läuft nicht oder ist nicht erreichbar\n' +
+                    '3. Falsche IP-Adresse oder Port\n' +
+                    '4. Firewall blockiert Port 443\n\n' +
+                    'Bitte prüfen Sie:\n' +
+                    '- CSM Web-GUI erreichbar unter https://' + ipAddress + '\n' +
+                    '- NBI-Lizenz aktiviert in CSM\n' +
+                    '- CSM-Logs unter $CSM_HOME/log/'
+            });
+          }
+          
           // Fehlercode 29 oder Login-Fehler erkennen
           if (/<error>\s*<code>\s*29\s*<\/code>/i.test(bodyText)) {
             console.warn(`[CSM][CODE29] ${ipAddress} session conflict - user already logged in`);
@@ -264,12 +284,20 @@ app.post('/csm-proxy', async (req, res) => {
             });
           }
 
-          // Sonstiger Fehler
+          // Andere HTTP-Fehler detailliert behandeln
+          let errorDetail = `HTTP ${response.status}: ${response.statusText || 'Unknown'}`;
+          if (response.status === 401 || response.status === 403) {
+            errorDetail = 'Authentifizierung fehlgeschlagen - Benutzername oder Passwort falsch';
+          } else if (response.status >= 500) {
+            errorDetail = `CSM Server Fehler (${response.status}) - Server möglicherweise überlastet`;
+          }
+          
+          console.error(`[${requestId}] ❌ Login failed: ${errorDetail}`);
           return res.status(423).json({
             ok: false,
             status: response.status,
-            statusText: response.statusText || 'Login failed',
-            body: response.data,
+            statusText: errorDetail,
+            body: bodyText,
           });
         });
       }
