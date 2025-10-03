@@ -208,14 +208,16 @@ app.post('/csm-proxy', async (req, res) => {
                   });
                 }
                 
-                // Anderer Anwendungsfehler (z.B. ungültige Credentials)
+                // Anwendungsfehler (kein Weiterprobieren anderer Kandidaten)
                 const errorCode = bodyText.match(/<code>(\d+)<\/code>/i)?.[1] || 'unknown';
-                const errorMsg = bodyText.match(/<message>([^<]+)<\/message>/i)?.[1] || 'Login failed';
-                console.error(`[${requestId}] ❌ CSM Login Error Code ${errorCode} at ${loginUrl}: ${errorMsg}`);
-                return res.status(401).json({
+                const errorMsg = bodyText.match(/<message>([^<]+)<\/message>/i)?.[1] || 'Application error';
+                console.error(`[${requestId}] ❌ CSM Login App Error ${errorCode} at ${loginUrl}: ${errorMsg}`);
+                await cleanupSession(ipAddress, currentBase, agent);
+                loginHints.delete(ipAddress);
+                return res.status(423).json({
                   ok: false,
-                  status: 401,
-                  statusText: `Login failed (Error ${errorCode}): ${errorMsg}`,
+                  status: 423,
+                  statusText: `CSM NB API application error (Error ${errorCode}): ${errorMsg}`,
                   body: bodyText,
                 });
               }
