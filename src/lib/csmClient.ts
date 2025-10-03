@@ -46,9 +46,9 @@ export class CSMClient {
     const result = await response.json();
     
     // Prüfe explizit auf ok:true, nicht nur HTTP-Status
-    if (result.ok !== true) {
+    if (result.ok !== true || !response.ok) {
       const statusCode = result.status ?? response.status;
-      const statusText = result.statusText ?? response.statusText;
+      const statusText = result.statusText ?? response.statusText ?? 'Unknown error';
       throw new Error(`CSM Login fehlgeschlagen: ${statusCode} ${statusText}`);
     }
     
@@ -84,12 +84,20 @@ export class CSMClient {
     const result = await response.json();
     
     // Prüfe explizit auf ok:true
-    if (result.ok !== true) {
+    if (result.ok !== true || !response.ok) {
       const statusCode = result.status ?? response.status;
-      const statusText = result.statusText ?? response.statusText;
+      const statusText = result.statusText ?? response.statusText ?? 'Unknown error';
       
       if (statusCode === 423) {
-        throw new Error('CSM Session gesperrt (Code 29). Bitte erneut anmelden.');
+        // Session-Lock (Code 29): Session lokal löschen
+        this.session = null;
+        throw new Error('CSM Session gesperrt (Code 29) - bitte erneut anmelden');
+      }
+      
+      if (statusCode === 401) {
+        // Unauthorized: Session ungültig
+        this.session = null;
+        throw new Error('CSM Session abgelaufen - bitte erneut anmelden');
       }
       
       throw new Error(`CSM Request fehlgeschlagen: ${statusCode} ${statusText}`);

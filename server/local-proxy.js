@@ -11,6 +11,17 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Default candidates for NBI endpoint discovery
+const DEFAULT_CANDIDATES = (ip) => [
+  `https://${ip}:443/nbi`,
+  `https://${ip}/nbi`,
+  `http://${ip}:1741/nbi`,
+  `https://${ip}:1741/nbi`,
+];
+
+// Manual base URL override from environment
+const OVERRIDE_BASE = process.env.CSM_BASEURL?.replace(/\/+$/, '');
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -142,12 +153,9 @@ app.post('/csm-proxy', async (req, res) => {
 
         return withSingleLogin(ipAddress, async () => {
           // Endpoint-Discovery: mehrere Kandidaten testen und Basis-URL speichern
-          const candidates = [
-            `https://${ipAddress}:443/nbi/login`,
-            `https://${ipAddress}/nbi/login`,
-            `http://${ipAddress}:1741/nbi/login`,
-            `https://${ipAddress}:1741/nbi/login`,
-          ];
+          const candidateBases = OVERRIDE_BASE 
+            ? [OVERRIDE_BASE] 
+            : DEFAULT_CANDIDATES(ipAddress);
 
           const loginXml = `<?xml version="1.0" encoding="UTF-8"?>
 <csm:loginRequest xmlns:csm="csm">
@@ -160,38 +168,60 @@ app.post('/csm-proxy', async (req, res) => {
           let chosenBase = null;
           let resp = null;
           let bodyText = '';
+          let lastTestedUrl = '';
 
-          for (const url of candidates) {
-            const currentBase = url.replace(/\/login$/, '');
+          for (const currentBase of candidateBases) {
+            const loginUrl = `${currentBase}/login`;
+            lastTestedUrl = loginUrl;
+            
             // alte Session auf dem Kandidaten bereinigen
             await cleanupSession(ipAddress, currentBase, agent);
 
             try {
-              const r = await axios.post(url, loginXml, {
+              const r = await axios.post(loginUrl, loginXml, {
                 headers: { 'Content-Type': 'application/xml', 'Accept': 'application/xml' },
                 httpsAgent: agent,
                 timeout: 30000,
                 validateStatus: () => true,
+                responseType: 'text',
+                proxy: false,
               });
+              
               resp = r;
               bodyText = String(r.data || '');
               const hasError = /<\s*error\b/i.test(bodyText);
-              const ok = r.status >= 200 && r.status < 300 && !hasError;
+              
+              console.log(`[CSM][LOGIN] ${ipAddress} via ${loginUrl}: HTTP ${r.status}, Has Error: ${hasError}`);
 
-              // Code 29: Session-Lock -> bereinigen und melden
-              if (/<error>\s*<code>\s*29\s*<\/code>/i.test(bodyText)) {
-                console.warn(`[CSM][CODE29] ${ipAddress} session conflict during login`);
-                await cleanupSession(ipAddress, currentBase, agent);
-                loginHints.delete(ipAddress);
-                return res.status(423).json({
+              // Bei 2xx mit <error>: Anwendungsfehler, nicht auf andere Ports ausweichen
+              if (r.status >= 200 && r.status < 300 && hasError) {
+                // Code 29: Session-Lock
+                if (/<error>\s*<code>\s*29\s*<\/code>/i.test(bodyText)) {
+                  console.warn(`[CSM][CODE29] ${ipAddress} session conflict during login at ${loginUrl}`);
+                  await cleanupSession(ipAddress, currentBase, agent);
+                  loginHints.delete(ipAddress);
+                  return res.status(423).json({
+                    ok: false,
+                    status: 423,
+                    statusText: 'CSM session locked (Code 29) - please wait and retry',
+                    body: bodyText,
+                  });
+                }
+                
+                // Anderer Anwendungsfehler (z.B. ungültige Credentials)
+                const errorCode = bodyText.match(/<code>(\d+)<\/code>/i)?.[1] || 'unknown';
+                const errorMsg = bodyText.match(/<message>([^<]+)<\/message>/i)?.[1] || 'Login failed';
+                console.error(`[${requestId}] ❌ CSM Login Error Code ${errorCode} at ${loginUrl}: ${errorMsg}`);
+                return res.status(401).json({
                   ok: false,
-                  status: 423,
-                  statusText: 'CSM session locked (Code 29)',
+                  status: 401,
+                  statusText: `Login failed (Error ${errorCode}): ${errorMsg}`,
                   body: bodyText,
                 });
               }
 
-              if (ok) {
+              // Erfolg: 2xx ohne <error>
+              if (r.status >= 200 && r.status < 300 && !hasError) {
                 // Cookies zusammenführen
                 const setCookieHeaders = r.headers['set-cookie'] || [];
                 const setCookies = Array.isArray(setCookieHeaders) ? setCookieHeaders : (setCookieHeaders ? [setCookieHeaders] : []);
@@ -209,7 +239,7 @@ app.post('/csm-proxy', async (req, res) => {
                 sessions.set(ipAddress, { cookie: mergedCookie, baseUrl: currentBase, lastUsed: Date.now() });
                 loginHints.set(ipAddress, { baseUrl: currentBase, expiresAt });
 
-                console.log(`[${requestId}] ✅ CSM Login via ${currentBase}/login (timeout ${mins}min)`);
+                console.log(`[${requestId}] ✅ CSM Login via ${loginUrl} (timeout ${mins}min)`);
                 return res.status(200).json({
                   ok: true,
                   status: 200,
@@ -217,17 +247,24 @@ app.post('/csm-proxy', async (req, res) => {
                   body: bodyText,
                 });
               }
+              
+              // Sonstige Fehler (4xx, 5xx) -> nächsten Kandidaten probieren
+              console.log(`[${requestId}] ⚠️ Login attempt failed at ${loginUrl}: HTTP ${r.status}`);
+              
             } catch (e) {
               resp = e?.response || resp;
               bodyText = String(resp?.data || e?.message || '');
+              console.log(`[${requestId}] ⚠️ Login attempt error at ${loginUrl}: ${e?.message}`);
             }
           }
 
-          console.warn(`[${requestId}] ❌ CSM NBI nicht gefunden, letzte Antwort: HTTP ${resp?.status || 'n/a'}`);
+          // Alle Kandidaten fehlgeschlagen
+          const finalStatus = resp?.status || 503;
+          console.warn(`[${requestId}] ❌ CSM NBI nicht gefunden. Letzter Versuch: ${lastTestedUrl} (HTTP ${finalStatus})`);
           return res.status(503).json({
             ok: false,
-            status: resp?.status || 503,
-            statusText: 'CSM NBI Service nicht verfügbar',
+            status: finalStatus,
+            statusText: `CSM NBI Service nicht verfügbar (letzter Versuch: ${lastTestedUrl})`,
             body: bodyText,
           });
         });
@@ -259,12 +296,28 @@ app.post('/csm-proxy', async (req, res) => {
         let r = await send();
         const text = String(r.data || '');
 
-        if ((r.status === 404 || r.status === 200) && /<\s*code>\s*29\s*<\/code>/i.test(text)) {
+        // Code 29 in beliebigem Status: Session bereinigen, 423 zurückgeben
+        if (/<\s*code>\s*29\s*<\/code>/i.test(text)) {
+          console.warn(`[CSM][CODE29] ${ipAddress} session conflict during request to ${endpoint}`);
           await cleanupSession(ipAddress, hint.baseUrl, agent);
           loginHints.delete(ipAddress);
-          return res.status(423).json({ ok: false, status: 423, statusText: 'CSM NB API session locked (29)', body: text });
+          return res.status(423).json({ 
+            ok: false, 
+            status: 423, 
+            statusText: 'CSM session locked (Code 29) - please login again', 
+            body: text 
+          });
         }
-        if (r.status >= 400) return res.status(r.status).json({ ok: false, status: r.status, statusText: 'Proxy request error', body: text });
+        
+        // HTTP-Fehler ohne Code 29
+        if (r.status >= 400) {
+          return res.status(r.status).json({ 
+            ok: false, 
+            status: r.status, 
+            statusText: `Request failed: HTTP ${r.status}`, 
+            body: text 
+          });
+        }
 
         return res.status(200).json({ ok: true, status: 200, statusText: 'OK', body: text });
       }
