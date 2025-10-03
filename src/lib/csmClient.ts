@@ -49,6 +49,15 @@ export class CSMClient {
     if (result.ok !== true || !response.ok) {
       const statusCode = result.status ?? response.status;
       const statusText = result.statusText ?? response.statusText ?? 'Unknown error';
+      if (statusCode === 423) {
+        throw new Error('CSM Session gesperrt (Code 29) - bitte erneut anmelden');
+      }
+      if (statusCode === 401) {
+        throw new Error('CSM Login fehlgeschlagen: Ungültige Anmeldedaten');
+      }
+      if (statusCode === 503 || statusCode === 404) {
+        throw new Error(`CSM NBI Service nicht verfügbar auf ${ipAddress}`);
+      }
       throw new Error(`CSM Login fehlgeschlagen: ${statusCode} ${statusText}`);
     }
     
@@ -72,7 +81,7 @@ export class CSMClient {
   }
 
   private async request(endpoint: string, body: string) {
-    if (!this.session) throw new Error('Not logged in to CSM');
+    if (!this.session) throw new Error('Nicht mit CSM verbunden');
     
     const ipAddress = this.session.baseUrl.replace('https://', '').replace('/nbi', '');
     const response = await fetch(this.localProxyUrl, {
@@ -98,6 +107,10 @@ export class CSMClient {
         // Unauthorized: Session ungültig
         this.session = null;
         throw new Error('CSM Session abgelaufen - bitte erneut anmelden');
+      }
+
+      if (statusCode === 503 || statusCode === 404) {
+        throw new Error(`CSM NBI Service nicht verfügbar auf ${ipAddress}`);
       }
       
       throw new Error(`CSM Request fehlgeschlagen: ${statusCode} ${statusText}`);
