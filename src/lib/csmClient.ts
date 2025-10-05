@@ -32,37 +32,41 @@ interface CSMCLIQuery {
 
 export class CSMClient {
   private session: CSMSession | null = null;
-  private localProxyUrl = '/csm-proxy';
+  private apiLoginUrl = '/api/login';
+  private proxyUrl = '/csm-proxy';
 
   async login({ ipAddress, username, password, verifyTls }: CSMLoginRequest): Promise<boolean> {
     console.log('🔐 CSM Login via local proxy');
     
-    const response = await fetch(this.localProxyUrl, {
+    const response = await fetch(this.apiLoginUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'login', ipAddress, username, password, verifyTls })
+      credentials: 'include', // Enable cookie handling
+      body: JSON.stringify({ ipAddress, username, password, verifyTls })
     });
     
     const result = await response.json();
     
-    // Prüfe explizit auf ok:true, nicht nur HTTP-Status
-    if (result.ok !== true || !response.ok) {
+    // Check for successful login
+    if (!result.ok || !response.ok) {
       const statusCode = result.status ?? response.status;
-      const statusText = result.statusText ?? response.statusText ?? 'Unknown error';
+      const message = result.message ?? result.statusText ?? 'Unknown error';
+      
       if (statusCode === 423) {
-        throw new Error('CSM Session gesperrt (Code 29) - bitte erneut anmelden');
+        throw new Error('CSM Session gesperrt (Code 29) - bitte warten und erneut versuchen');
       }
-      if (statusCode === 401) {
-        throw new Error('CSM Login fehlgeschlagen: Ungültige Anmeldedaten');
+      if (statusCode === 401 || statusCode === 400) {
+        throw new Error(`CSM Login fehlgeschlagen: ${message}`);
       }
-      if (statusCode === 503 || statusCode === 404) {
+      if (statusCode === 503) {
         throw new Error(`CSM NBI Service nicht verfügbar auf ${ipAddress}`);
       }
-      throw new Error(`CSM Login fehlgeschlagen: ${statusCode} ${statusText}`);
+      throw new Error(`CSM Login fehlgeschlagen: ${statusCode} ${message}`);
     }
     
-    // Session nur als Platzhalter - Cookie-Verwaltung erfolgt im Proxy
-    this.session = { cookie: '', baseUrl: `https://${ipAddress}/nbi` };
+    // Session als Platzhalter - Cookie wird vom Browser automatisch verwaltet
+    this.session = { cookie: '', baseUrl: `http://${ipAddress}:1741/nbi/v1` };
+    console.log('✅ Login erfolgreich, Session-Cookie gesetzt');
     return true;
   }
 
@@ -83,10 +87,17 @@ export class CSMClient {
   private async request(endpoint: string, body: string) {
     if (!this.session) throw new Error('Nicht mit CSM verbunden');
     
-    const ipAddress = this.session.baseUrl.replace('https://', '').replace('/nbi', '');
-    const response = await fetch(this.localProxyUrl, {
+    const ipAddress = this.session.baseUrl
+      .replace('https://', '')
+      .replace('http://', '')
+      .replace(':1741', '')
+      .replace('/nbi/v1', '')
+      .replace('/nbi', '');
+    
+    const response = await fetch(this.proxyUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include', // Enable cookie handling
       body: JSON.stringify({ action: 'request', ipAddress, endpoint, body })
     });
     
@@ -165,12 +176,18 @@ export class CSMClient {
   async logout() {
     if (!this.session) return;
     
-    const ipAddress = this.session.baseUrl.replace('https://', '').replace('/nbi', '');
+    const ipAddress = this.session.baseUrl
+      .replace('https://', '')
+      .replace('http://', '')
+      .replace(':1741', '')
+      .replace('/nbi/v1', '')
+      .replace('/nbi', '');
     
     try {
-      const response = await fetch(this.localProxyUrl, {
+      const response = await fetch(this.proxyUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include', // Enable cookie handling
         body: JSON.stringify({ action: 'logout', ipAddress })
       });
       
