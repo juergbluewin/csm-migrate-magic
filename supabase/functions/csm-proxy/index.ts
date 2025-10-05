@@ -124,10 +124,12 @@ serve(async (req) => {
       }
 
       const loginXml = `<?xml version="1.0" encoding="UTF-8"?>
-        <loginRequest>
-          <username>${username}</username>
-          <password>${password}</password>
-        </loginRequest>`;
+<loginRequest xmlns="csm">
+  <protVersion>2.0</protVersion>
+  <reqId>${requestId}</reqId>
+  <username>${username}</username>
+  <password>${password}</password>
+</loginRequest>`;
 
       const baseUrl = `https://${ipAddress}/nbi`;
       
