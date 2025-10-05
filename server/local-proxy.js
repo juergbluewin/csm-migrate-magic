@@ -4,6 +4,7 @@ import https from 'https';
 import axios from 'axios';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import { z } from 'zod';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -347,6 +348,154 @@ app.post('/csm-proxy', async (req, res) => {
       });
     }
   });
+});
+
+// API Login endpoint with validation
+const loginSchema = z.object({
+  ipAddress: z.string().ip().or(z.string().regex(/^[\w.-]+$/, 'Invalid hostname')),
+  username: z.string().trim().min(1, 'Username required').max(100),
+  password: z.string().min(1, 'Password required').max(255),
+  verifyTls: z.boolean().optional(),
+});
+
+app.post('/api/login', express.json(), async (req, res) => {
+  const requestId = Math.random().toString(36).slice(2, 10);
+  
+  try {
+    // Validate input
+    const validated = loginSchema.parse(req.body);
+    const { ipAddress, username, password, verifyTls } = validated;
+    
+    const agent = new https.Agent({ rejectUnauthorized: verifyTls === true });
+    
+    // Check if session already exists
+    if (hasSession(ipAddress)) {
+      console.log(`[${requestId}] ✅ Session already exists for ${ipAddress}`);
+      return res.status(200).json({
+        ok: true,
+        status: 200,
+        message: 'Already logged in',
+      });
+    }
+    
+    return serialize(ipAddress, async () => {
+      return withSingleLogin(ipAddress, async () => {
+        const candidateBases = OVERRIDE_BASE 
+          ? [OVERRIDE_BASE] 
+          : DEFAULT_CANDIDATES(ipAddress);
+        
+        const loginXml = buildLoginXml({ reqId: requestId, username, password });
+        
+        let chosenBase = null;
+        let resp = null;
+        let bodyText = '';
+        
+        for (const currentBase of candidateBases) {
+          const loginUrl = `${currentBase}/login`;
+          await cleanupSession(ipAddress, currentBase, agent);
+          
+          try {
+            const r = await axios.post(loginUrl, loginXml, {
+              headers: { 'Content-Type': 'application/xml', 'Accept': 'application/xml' },
+              httpAgent: new (require('http').Agent)(),
+              httpsAgent: agent,
+              timeout: 30000,
+              validateStatus: () => true,
+              responseType: 'text',
+              proxy: false,
+            });
+            
+            resp = r;
+            bodyText = String(r.data || '');
+            const hasError = /<\s*error\b/i.test(bodyText);
+            
+            console.log(`[${requestId}] Login attempt ${ipAddress} via ${loginUrl}: HTTP ${r.status}, Has Error: ${hasError}`);
+            
+            // Application error with error code
+            if (r.status >= 200 && r.status < 300 && hasError) {
+              if (/<error>\s*<code>\s*29\s*<\/code>/i.test(bodyText)) {
+                console.warn(`[${requestId}] Code 29 session conflict at ${loginUrl}`);
+                await cleanupSession(ipAddress, currentBase, agent);
+                loginHints.delete(ipAddress);
+                return res.status(423).json({
+                  ok: false,
+                  status: 423,
+                  message: 'CSM session locked (Code 29) - please wait and retry',
+                });
+              }
+              
+              const errorCode = bodyText.match(/<code>(\d+)<\/code>/i)?.[1] || 'unknown';
+              const errorMsg = bodyText.match(/<message>([^<]+)<\/message>/i)?.[1] || 'Application error';
+              console.error(`[${requestId}] CSM login error ${errorCode}: ${errorMsg}`);
+              return res.status(400).json({
+                ok: false,
+                status: 400,
+                message: `CSM login failed (Error ${errorCode}): ${errorMsg}`,
+              });
+            }
+            
+            // Success: 2xx without error
+            if (r.status >= 200 && r.status < 300 && !hasError) {
+              const setCookieHeaders = r.headers['set-cookie'] || [];
+              const setCookies = Array.isArray(setCookieHeaders) ? setCookieHeaders : (setCookieHeaders ? [setCookieHeaders] : []);
+              const cookieParts = [];
+              for (const c of setCookies) {
+                const match = /^([^=]+)=([^;]+)/.exec(c);
+                if (match) cookieParts.push(`${match[1]}=${match[2]}`);
+              }
+              const mergedCookie = cookieParts.join('; ');
+              
+              const timeoutMatch = bodyText.match(/<sessionTimeoutInMins>(\d+)<\/sessionTimeoutInMins>/i);
+              const mins = timeoutMatch ? parseInt(timeoutMatch[1], 10) : 30;
+              const expiresAt = Date.now() + mins * 60 * 1000;
+              
+              sessions.set(ipAddress, { cookie: mergedCookie, baseUrl: currentBase, lastUsed: Date.now() });
+              loginHints.set(ipAddress, { baseUrl: currentBase, expiresAt });
+              
+              console.log(`[${requestId}] ✅ Login successful via ${loginUrl} (timeout ${mins}min)`);
+              return res.status(200).json({
+                ok: true,
+                status: 200,
+                message: 'Login successful',
+                sessionTimeout: mins,
+              });
+            }
+            
+            console.log(`[${requestId}] Login failed at ${loginUrl}: HTTP ${r.status}`);
+          } catch (e) {
+            resp = e?.response || resp;
+            bodyText = String(resp?.data || e?.message || '');
+            console.log(`[${requestId}] Login error at ${loginUrl}: ${e?.message}`);
+          }
+        }
+        
+        // All candidates failed
+        const finalStatus = resp?.status || 503;
+        console.warn(`[${requestId}] CSM NBI not found. Status: ${finalStatus}`);
+        return res.status(503).json({
+          ok: false,
+          status: finalStatus,
+          message: 'CSM NBI service not available',
+        });
+      });
+    });
+  } catch (e) {
+    if (e instanceof z.ZodError) {
+      return res.status(400).json({
+        ok: false,
+        status: 400,
+        message: 'Validation error',
+        errors: e.errors.map(err => ({ field: err.path.join('.'), message: err.message })),
+      });
+    }
+    
+    console.error(`[${requestId}] Login error:`, e?.message || e);
+    return res.status(500).json({
+      ok: false,
+      status: 500,
+      message: e?.message || 'Internal server error',
+    });
+  }
 });
 
 // Verbindungstest ohne Re-Login
