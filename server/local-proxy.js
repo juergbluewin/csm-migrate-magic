@@ -22,13 +22,16 @@ const DEFAULT_CANDIDATES = (ip) => [
 // Manual base URL override from environment
 const OVERRIDE_BASE = process.env.CSM_BASEURL?.replace(/\/+$/, '');
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+// CORS configuration for Same-Origin policy
+const ALLOWED_ORIGIN = 'http://localhost:3000';
 
 app.use((req, res, next) => {
-  Object.entries(corsHeaders).forEach(([k, v]) => res.setHeader(k, v));
+  res.setHeader('Access-Control-Allow-Origin', ALLOWED_ORIGIN);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Access-Control-Expose-Headers', 'Set-Cookie, Content-Type');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
