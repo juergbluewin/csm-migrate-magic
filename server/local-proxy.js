@@ -15,8 +15,11 @@ const PORT = process.env.PORT || 3000;
 const DEFAULT_CANDIDATES = (ip) => [
   `https://${ip}:443/nbi`,
   `https://${ip}/nbi`,
+  `https://${ip}/nbi/v1`,
   `http://${ip}:1741/nbi`,
+  `http://${ip}:1741/csm/nbi`,
   `https://${ip}:1741/nbi`,
+  `https://${ip}:1741/nbi/v1`,
 ];
 
 // Manual base URL override from environment
