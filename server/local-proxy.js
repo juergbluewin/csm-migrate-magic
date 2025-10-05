@@ -352,7 +352,7 @@ app.post('/csm-proxy', async (req, res) => {
 
 // API Login endpoint with validation
 const loginSchema = z.object({
-  ipAddress: z.string().ip().or(z.string().regex(/^[\w.-]+$/, 'Invalid hostname')),
+  ipAddress: z.string().regex(/^(?:\d{1,3}\.){3}\d{1,3}$|^[\w.-]+$/, 'Invalid IP address or hostname'),
   username: z.string().trim().min(1, 'Username required').max(100),
   password: z.string().min(1, 'Password required').max(255),
   verifyTls: z.boolean().optional(),
