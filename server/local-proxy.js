@@ -63,6 +63,7 @@ async function cleanupSession(ipAddress, baseUrl, agent) {
           'Accept': 'application/xml',
           'Cookie': session.cookie,
         },
+        httpAgent: new (require('http').Agent)(),
         httpsAgent: agent,
         timeout: 10000,
         validateStatus: () => true,
