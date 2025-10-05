@@ -11,15 +11,12 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Default candidates for NBI endpoint discovery
+// Default candidates for NBI endpoint discovery (prioritize HTTP 1741/v1)
 const DEFAULT_CANDIDATES = (ip) => [
-  `https://${ip}:443/nbi`,
-  `https://${ip}/nbi`,
-  `https://${ip}/nbi/v1`,
+  `http://${ip}:1741/nbi/v1`,
   `http://${ip}:1741/nbi`,
-  `http://${ip}:1741/csm/nbi`,
-  `https://${ip}:1741/nbi`,
-  `https://${ip}:1741/nbi/v1`,
+  `https://${ip}/nbi/v1`,
+  `https://${ip}/nbi`,
 ];
 
 // Manual base URL override from environment
@@ -52,10 +49,10 @@ async function cleanupSession(ipAddress, baseUrl, agent) {
     try {
       // Logout gemäß Cisco CSM NBI API Spec v2.4 (Figure 16, Page 40)
       const logoutXml = `<?xml version="1.0" encoding="UTF-8"?>
-<csm:logoutRequest xmlns:csm="csm">
-  <csm:protVersion>1.0</csm:protVersion>
-  <csm:reqId>${Math.random().toString(36).slice(2, 10)}</csm:reqId>
-</csm:logoutRequest>`;
+<logoutRequest xmlns="csm">
+  <protVersion>2.0</protVersion>
+  <reqId>${Math.random().toString(36).slice(2, 10)}</reqId>
+</logoutRequest>`;
       
       await axios.post(`${baseUrl}/logout`, logoutXml, {
         headers: {
@@ -161,12 +158,12 @@ app.post('/csm-proxy', async (req, res) => {
             : DEFAULT_CANDIDATES(ipAddress);
 
           const loginXml = `<?xml version="1.0" encoding="UTF-8"?>
-<csm:loginRequest xmlns:csm="csm">
-  <csm:protVersion>1.0</csm:protVersion>
-  <csm:reqId>${requestId}</csm:reqId>
-  <csm:userName>${username}</csm:userName>
-  <csm:password>${password}</csm:password>
-</csm:loginRequest>`;
+<loginRequest xmlns="csm">
+  <protVersion>2.0</protVersion>
+  <reqId>${requestId}</reqId>
+  <username>${username}</username>
+  <password>${password}</password>
+</loginRequest>`;
 
           let chosenBase = null;
           let resp = null;
@@ -183,6 +180,7 @@ app.post('/csm-proxy', async (req, res) => {
             try {
               const r = await axios.post(loginUrl, loginXml, {
                 headers: { 'Content-Type': 'application/xml', 'Accept': 'application/xml' },
+                httpAgent: new (require('http').Agent)(),
                 httpsAgent: agent,
                 timeout: 30000,
                 validateStatus: () => true,
@@ -287,6 +285,7 @@ app.post('/csm-proxy', async (req, res) => {
         const cookieStr = session?.cookie || '';
 
         const send = () => axios.post(url, body, {
+          httpAgent: new (require('http').Agent)(),
           httpsAgent: agent,
           headers: {
             'Content-Type': 'application/xml',
@@ -362,12 +361,13 @@ app.post('/proxy/test', async (req, res) => {
   try {
     // Test-Request gemäß Cisco CSM NBI API Spec
     const testXml = `<?xml version="1.0" encoding="UTF-8"?>
-<csm:getVersionRequest xmlns:csm="csm">
-  <csm:protVersion>1.0</csm:protVersion>
-  <csm:reqId>${requestId}</csm:reqId>
-</csm:getVersionRequest>`;
+<getVersionRequest xmlns="csm">
+  <protVersion>2.0</protVersion>
+  <reqId>${requestId}</reqId>
+</getVersionRequest>`;
     
     const r = await axios.post(url, testXml, {
+      httpAgent: new (require('http').Agent)(),
       httpsAgent: agent,
       headers: { 
         'Content-Type': 'application/xml', 
