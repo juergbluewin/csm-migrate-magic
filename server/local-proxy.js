@@ -15,28 +15,34 @@ const PORT = process.env.PORT || 3000;
 
 // Default candidates for NBI endpoint discovery (prioritize HTTP 1741/v1)
 const DEFAULT_CANDIDATES = (ip) => [
-  `http://${ip}:1741/nbi/v1`,
-  `http://${ip}:1741/nbi`,
-  `https://${ip}/nbi/v1`,
   `https://${ip}/nbi`,
+  `https://${ip}/nbi/v1`,
+  `http://${ip}:1741/nbi`,
+  `http://${ip}:1741/nbi/v1`,
 ];
 
 // Manual base URL override from environment
 const OVERRIDE_BASE = process.env.CSM_BASEURL?.replace(/\/+$/, '');
 
 // CORS configuration for Same-Origin policy
-const ALLOWED_ORIGIN = 'http://localhost:3000';
-
+const ORIGIN_WHITELIST = new Set([
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+]);
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', ALLOWED_ORIGIN);
-  res.header('Vary', 'Origin');
-  res.header('Access-Control-Allow-Credentials', 'true');
+  const origin = req.headers.origin;
+  if (origin && ORIGIN_WHITELIST.has(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Vary', 'Origin');
+    res.header('Access-Control-Allow-Credentials', 'true');
+  }
   res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
   res.header('Access-Control-Expose-Headers', 'Set-Cookie, Content-Type');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
+
 
 app.use(express.json({ limit: '2mb' }));
 
@@ -170,9 +176,16 @@ app.post('/csm-proxy', async (req, res) => {
 
         return withSingleLogin(ipAddress, async () => {
           // Endpoint-Discovery: mehrere Kandidaten testen und Basis-URL speichern
-          const candidateBases = OVERRIDE_BASE 
-            ? [OVERRIDE_BASE] 
-            : DEFAULT_CANDIDATES(ipAddress);
+          const expandOverride = (base) => {
+  const b = base.replace(/\/+$/, '');
+  const hasV1 = /\/v1$/.test(b);
+  const withoutV1 = b.replace(/\/v1$/, '');
+  const withV1 = hasV1 ? b : `${b}/v1`;
+  // Reihenfolge: exakt, ohne /v1, mit /v1
+  const arr = [b, withoutV1, withV1].filter((v, i, a) => a.indexOf(v) === i);
+  return arr;
+};
+const candidateBases = OVERRIDE_BASE ? expandOverride(OVERRIDE_BASE) : DEFAULT_CANDIDATES(ipAddress);
 
           const loginXml = buildLoginXml({ reqId: requestId, username, password });
 
