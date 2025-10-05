@@ -118,6 +118,17 @@ function resolvePath(ip, incomingPath) {
   return needsPrefix ? `${basePath}${incomingPath}` : incomingPath;
 }
 
+// Build login XML with correct format for CSM v2.0
+function buildLoginXml({ reqId, username, password }) {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<loginRequest xmlns="csm">
+  <protVersion>2.0</protVersion>
+  <reqId>${reqId}</reqId>
+  <username>${username}</username>
+  <password>${password}</password>
+</loginRequest>`;
+}
+
 app.post('/csm-proxy', async (req, res) => {
   const { action, ipAddress, username, password, verifyTls, endpoint, body } = req.body || {};
   const requestId = Math.random().toString(36).slice(2, 10);
@@ -161,13 +172,7 @@ app.post('/csm-proxy', async (req, res) => {
             ? [OVERRIDE_BASE] 
             : DEFAULT_CANDIDATES(ipAddress);
 
-          const loginXml = `<?xml version="1.0" encoding="UTF-8"?>
-<loginRequest xmlns="csm">
-  <protVersion>2.0</protVersion>
-  <reqId>${requestId}</reqId>
-  <username>${username}</username>
-  <password>${password}</password>
-</loginRequest>`;
+          const loginXml = buildLoginXml({ reqId: requestId, username, password });
 
           let chosenBase = null;
           let resp = null;
