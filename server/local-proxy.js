@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
-import https from 'https';
+import http from 'node:http';
+import https from 'node:https';
 import axios from 'axios';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
@@ -64,7 +65,7 @@ async function cleanupSession(ipAddress, baseUrl, agent) {
           'Accept': 'application/xml',
           'Cookie': session.cookie,
         },
-        httpAgent: new (require('http').Agent)(),
+        httpAgent: new http.Agent(),
         httpsAgent: agent,
         timeout: 10000,
         validateStatus: () => true,
@@ -190,7 +191,7 @@ app.post('/csm-proxy', async (req, res) => {
             try {
               const r = await axios.post(loginUrl, loginXml, {
                 headers: { 'Content-Type': 'application/xml', 'Accept': 'application/xml' },
-                httpAgent: new (require('http').Agent)(),
+                httpAgent: new http.Agent(),
                 httpsAgent: agent,
                 timeout: 30000,
                 validateStatus: () => true,
@@ -295,7 +296,7 @@ app.post('/csm-proxy', async (req, res) => {
         const cookieStr = session?.cookie || '';
 
         const send = () => axios.post(url, body, {
-          httpAgent: new (require('http').Agent)(),
+          httpAgent: new http.Agent(),
           httpsAgent: agent,
           headers: {
             'Content-Type': 'application/xml',
@@ -397,7 +398,7 @@ app.post('/api/login', express.json(), async (req, res) => {
           try {
             const r = await axios.post(loginUrl, loginXml, {
               headers: { 'Content-Type': 'application/xml', 'Accept': 'application/xml' },
-              httpAgent: new (require('http').Agent)(),
+              httpAgent: new http.Agent(),
               httpsAgent: agent,
               timeout: 30000,
               validateStatus: () => true,
@@ -525,7 +526,7 @@ app.post('/proxy/test', async (req, res) => {
 </getVersionRequest>`;
     
     const r = await axios.post(url, testXml, {
-      httpAgent: new (require('http').Agent)(),
+      httpAgent: new http.Agent(),
       httpsAgent: agent,
       headers: { 
         'Content-Type': 'application/xml', 
