@@ -354,7 +354,7 @@ app.post('/proxy/test', async (req, res) => {
 
   const agent = new https.Agent({ rejectUnauthorized: verifyTls === true });
   const hint = loginHints.get(ipAddress);
-  const baseUrl = hint?.baseUrl || `https://${ipAddress}/nbi`;
+  const baseUrl = hint?.baseUrl || `http://${ipAddress}:1741/nbi/v1`;
   const url = `${baseUrl}/configservice/getVersion`;
   
   // Cookie aus Session holen
