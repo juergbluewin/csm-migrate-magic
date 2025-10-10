@@ -36,38 +36,71 @@ export class CSMClient {
   private proxyUrl = '/csm-proxy';
 
   async login({ ipAddress, username, password, verifyTls }: CSMLoginRequest): Promise<boolean> {
-    console.log('🔐 CSM Login via local proxy');
-    
-    const response = await fetch(this.apiLoginUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include', // Enable cookie handling
-      body: JSON.stringify({ ipAddress, username, password, verifyTls })
+    console.log('🔐 CSM Login via local proxy', { 
+      ipAddress, 
+      verifyTls, 
+      timestamp: new Date().toISOString() 
     });
     
-    const result = await response.json();
-    
-    // Check for successful login
-    if (!result.ok || !response.ok) {
-      const statusCode = result.status ?? response.status;
-      const message = result.message ?? result.statusText ?? 'Unknown error';
+    try {
+      const response = await fetch(this.apiLoginUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include', // Enable cookie handling
+        body: JSON.stringify({ ipAddress, username, password, verifyTls })
+      });
       
-      if (statusCode === 423) {
-        throw new Error('CSM Session gesperrt (Code 29) - bitte warten und erneut versuchen');
+      const result = await response.json();
+      
+      console.log('📥 Login response:', {
+        ok: result.ok,
+        status: result.status ?? response.status,
+        message: result.message
+      });
+      
+      // Check for successful login
+      if (!result.ok || !response.ok) {
+        const statusCode = result.status ?? response.status;
+        const message = result.message ?? result.statusText ?? 'Unknown error';
+        
+        // Enhanced error messages with actionable information
+        if (statusCode === 423) {
+          throw new Error('CSM Session gesperrt (Code 29)\n\nDie CSM-Session ist gesperrt, da bereits eine aktive Verbindung besteht.\n\nLösung: Warten Sie 60 Sekunden und versuchen Sie es erneut.');
+        }
+        if (statusCode === 401) {
+          throw new Error(`Authentifizierung fehlgeschlagen\n\nBenutzername oder Passwort ist falsch.\n\nBitte überprüfen Sie Ihre Zugangsdaten.`);
+        }
+        if (statusCode === 400) {
+          throw new Error(`Login fehlgeschlagen: ${message}\n\nPrüfen Sie:\n- Benutzername und Passwort\n- Sind alle Felder ausgefüllt?`);
+        }
+        if (statusCode === 404) {
+          throw new Error(`CSM NBI Endpoint nicht gefunden (HTTP 404)\n\nDer NBI Service ist auf ${ipAddress} nicht verfügbar.\n\nPrüfen Sie:\n- Ist die IP-Adresse korrekt?\n- Ist der NBI Service aktiviert? (Administration → License → NBI)\n- Läuft CSM auf diesem Server?`);
+        }
+        if (statusCode === 503) {
+          throw new Error(`CSM NBI Service nicht verfügbar (HTTP 503)\n\nDer Service ist auf ${ipAddress} nicht erreichbar.\n\nPrüfen Sie:\n- Läuft der CSM Server?\n- Ist der NBI Service gestartet?\n- Prüfen Sie die CSM-Logs: $CSM_HOME/log/nbi.log`);
+        }
+        if (statusCode === 500 || statusCode >= 500) {
+          throw new Error(`CSM Server-Fehler (HTTP ${statusCode})\n\n${message}\n\nDer CSM Server meldet einen internen Fehler. Prüfen Sie die Server-Logs.`);
+        }
+        
+        // Generic error with status code
+        throw new Error(`CSM Login fehlgeschlagen (HTTP ${statusCode})\n\n${message}`);
       }
-      if (statusCode === 401 || statusCode === 400) {
-        throw new Error(`CSM Login fehlgeschlagen: ${message}`);
+      
+      // Session als Platzhalter - Cookie wird vom Browser automatisch verwaltet
+      this.session = { cookie: '', baseUrl: `http://${ipAddress}:1741/nbi/v1` };
+      console.log('✅ Login erfolgreich, Session-Cookie gesetzt');
+      return true;
+      
+    } catch (error) {
+      // Enhanced error handling for network errors
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        throw new Error(`Netzwerkfehler beim Verbinden zu ${ipAddress}\n\nMögliche Ursachen:\n- Server nicht erreichbar\n- Firewall blockiert die Verbindung\n- Falsche IP-Adresse\n- CORS-Richtlinien blockieren die Anfrage\n\nLösung:\n- Prüfen Sie die Netzwerkverbindung\n- Stellen Sie sicher, dass der lokale Proxy läuft`);
       }
-      if (statusCode === 503) {
-        throw new Error(`CSM NBI Service nicht verfügbar auf ${ipAddress}`);
-      }
-      throw new Error(`CSM Login fehlgeschlagen: ${statusCode} ${message}`);
+      
+      // Re-throw any other errors
+      throw error;
     }
-    
-    // Session als Platzhalter - Cookie wird vom Browser automatisch verwaltet
-    this.session = { cookie: '', baseUrl: `http://${ipAddress}:1741/nbi/v1` };
-    console.log('✅ Login erfolgreich, Session-Cookie gesetzt');
-    return true;
   }
 
   async getPolicyObjectsList({ policyObjectType, limit = 100, offset = 0 }: CSMObjectQuery) {

@@ -117,26 +117,60 @@ export class CSMHandler {
   // Connection Management
   async connect(ipAddress: string, username: string, password: string, verifyTls = false): Promise<boolean> {
     try {
-      console.log('Connecting to CSM API...');
+      console.log('🔌 Connecting to CSM API...', { ipAddress, verifyTls });
       const success = await this.csmClient.login({ ipAddress, username, password, verifyTls });
       
       if (success) {
         this.connected = true;
-        console.log('Successfully connected to CSM API');
+        console.log('✅ Successfully connected to CSM API');
         toast({
-          title: "Connected",
-          description: "Successfully connected to CSM",
+          title: "Verbunden",
+          description: `Erfolgreich mit CSM auf ${ipAddress} verbunden`,
         });
       }
       
       return success;
     } catch (error) {
-      console.error('Failed to connect to CSM:', error);
+      console.error('❌ Failed to connect to CSM:', error);
+      
+      // Enhanced error handling with specific messages
+      let errorTitle = "Verbindungsfehler";
+      let errorMessage = "Unbekannter Fehler";
+      
+      if (error instanceof Error) {
+        errorMessage = error.message;
+        
+        // Specific error types
+        if (errorMessage.includes('Code 29')) {
+          errorTitle = "Session gesperrt";
+          errorMessage = "Die CSM-Session ist gesperrt. Bitte warten Sie 60 Sekunden und versuchen Sie es erneut.";
+        } else if (errorMessage.includes('404')) {
+          errorTitle = "NBI Endpoint nicht gefunden";
+          errorMessage = `Der CSM NBI Service wurde auf ${ipAddress} nicht gefunden. Prüfen Sie:\n- Ist die IP-Adresse korrekt?\n- Ist der NBI Service aktiviert?\n- Läuft CSM auf diesem Server?`;
+        } else if (errorMessage.includes('503')) {
+          errorTitle = "CSM Service nicht verfügbar";
+          errorMessage = `Der CSM NBI Service ist nicht verfügbar. Prüfen Sie:\n- Läuft der CSM Server?\n- Ist der NBI Service gestartet?`;
+        } else if (errorMessage.includes('self-signed certificate') || errorMessage.includes('certificate')) {
+          errorTitle = "TLS-Zertifikatsfehler";
+          errorMessage = `Das TLS-Zertifikat ist selbstsigniert oder ungültig. Deaktivieren Sie die TLS-Verifizierung für selbstsignierte Zertifikate.`;
+        } else if (errorMessage.includes('Failed to fetch') || errorMessage.includes('Network')) {
+          errorTitle = "Netzwerkfehler";
+          errorMessage = `Netzwerkverbindung fehlgeschlagen:\n- Ist der Server erreichbar?\n- Blockiert eine Firewall die Verbindung?\n- Ist die IP-Adresse korrekt?`;
+        } else if (errorMessage.includes('timeout') || errorMessage.includes('Timeout')) {
+          errorTitle = "Verbindungs-Timeout";
+          errorMessage = `Die Verbindung zum CSM Server hat zu lange gedauert. Prüfen Sie die Netzwerkverbindung.`;
+        } else if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
+          errorTitle = "Authentifizierung fehlgeschlagen";
+          errorMessage = "Benutzername oder Passwort ist falsch.";
+        }
+      }
+      
       toast({
-        title: "Connection Failed",
-        description: error instanceof Error ? error.message : "Unknown error",
+        title: errorTitle,
+        description: errorMessage,
         variant: "destructive",
       });
+      
       return false;
     }
   }
