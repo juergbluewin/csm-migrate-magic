@@ -83,7 +83,7 @@ export const ConnectionPanel = ({
   const runCSMDiagnostics = async () => {
     const cid = generateCorrelationId();
     const ip = (csmConnection.ipAddress || '').trim();
-    addLog('info', '🔍 CSM Erweiterte Diagnose gestartet', `Korrelation-ID: ${cid}\nTLS-Verifizierung: ${csmConnection.verifyTls ? 'Aktiviert' : 'Deaktiviert'}`);
+    addLog('info', '🔍 CSM Login-Diagnose gestartet', `Korrelation-ID: ${cid}\nTLS-Verifizierung: ${csmConnection.verifyTls ? 'Aktiviert' : 'Deaktiviert'}`);
 
     if (!ip) {
       addLog('error', 'Diagnose', 'CSM IP-Adresse fehlt');
@@ -109,22 +109,14 @@ export const ConnectionPanel = ({
       }
     }
 
-    addLog('info', '🌐 Netzwerk-Analyse Phase 1', `Prüfe Erreichbarkeit von ${ip}...`);
+    addLog('info', '🌐 Teste Login-Endpunkte', `Simuliere echte Login-Versuche an ${ip}...\nDies testet die gleichen Endpunkte wie der tatsächliche Login`);
 
-    // Test multiple endpoints
-    const endpoints = [
-      { url: `https://${ip}/nbi/`, label: 'HTTPS /nbi/', method: 'GET' },
-      { url: `https://${ip}/nbi/v1/`, label: 'HTTPS /nbi/v1/', method: 'GET' },
-      { url: `https://${ip}/nbi/login`, label: 'HTTPS /nbi/login', method: 'POST' },
-      { url: `http://${ip}:1741/nbi/`, label: 'HTTP Port 1741 /nbi/', method: 'GET' },
-      { url: `http://${ip}:1741/nbi/v1/`, label: 'HTTP Port 1741 /nbi/v1/', method: 'GET' },
-    ];
-    
-    const timeoutMs = 8000;
+    // Test actual login via proxy - this simulates real login behavior
     const results: string[] = [];
     let totalTests = 0;
     let failedTests = 0;
     let successfulEndpoint: string | null = null;
+    const timeoutMs = 8000;
 
     const analyzeError = (error: any): { short: string; detailed: string } => {
       if (error?.name === 'AbortError') {
@@ -175,46 +167,106 @@ export const ConnectionPanel = ({
       };
     };
 
-    const testEndpoint = async (url: string, label: string, method: string = 'GET') => {
+    // Test login via proxy - simulates actual login request
+    const testLoginEndpoint = async () => {
       totalTests++;
+      const startTime = Date.now();
+      
       try {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), timeoutMs);
         
-        const startTime = Date.now();
-        const response = await fetch(url, { 
-          method, 
-          mode: 'no-cors', 
+        // Try actual login via proxy to test real behavior
+        const response = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           signal: controller.signal,
-          headers: method === 'POST' ? { 'Content-Type': 'application/xml' } : {}
+          body: JSON.stringify({
+            ipAddress: ip,
+            username: 'diagnostic-test',
+            password: 'diagnostic-test',
+            verifyTls: csmConnection.verifyTls
+          })
         });
-        const responseTime = Date.now() - startTime;
         
         clearTimeout(timer);
-        addLog('success', `✅ ${label}`, `Verbindung zu ${url} erfolgreich\nAntwortzeit: ${responseTime}ms\n(Response-Inhalt durch CORS möglicherweise blockiert)`);
-        results.push(`${label}: ✓ Erreichbar (${responseTime}ms)`);
+        const duration = Date.now() - startTime;
+        const result = await response.json();
         
-        if (!successfulEndpoint) {
-          successfulEndpoint = url;
+        // Analyze response
+        if (response.ok && result.ok) {
+          // Success - actual login worked (unlikely with test credentials, but possible)
+          addLog('success', '✅ Login-Endpunkt funktioniert', 
+            `Der CSM Server akzeptiert Login-Requests korrekt (${duration}ms)\n` +
+            `Dies bedeutet, dass Ihre echten Zugangsdaten funktionieren sollten.`);
+          results.push(`Login-Test: ✓ Funktioniert (${duration}ms)`);
+          successfulEndpoint = `https://${ip}/nbi/login`;
+          return true;
+        } else if (result.status === 401 || result.status === 400 || result.status === 423) {
+          // Authentication error - endpoint exists and responds, just wrong credentials
+          addLog('success', '✅ Login-Endpunkt erreichbar', 
+            `HTTP ${result.status} - Der Endpunkt funktioniert! (${duration}ms)\n` +
+            `Fehler: ${result.message || 'Login fehlgeschlagen'}\n\n` +
+            `Dies ist normal für Test-Zugangsdaten. Der Endpunkt funktioniert!\n` +
+            `➡️ Verwenden Sie Ihre echten CSM-Zugangsdaten für die Verbindung.`);
+          results.push(`Login-Test: ⚠️ Endpunkt OK, Test-Login fehlgeschlagen (${duration}ms)`);
+          if (!successfulEndpoint) successfulEndpoint = `https://${ip}/nbi/login`;
+          return true;
+        } else if (result.status === 404) {
+          // Not found - endpoint doesn't exist
+          failedTests++;
+          addLog('error', '❌ Login-Endpunkt nicht gefunden', 
+            `HTTP 404 - Der NBI Service-Endpunkt existiert nicht (${duration}ms)\n\n` +
+            `Mögliche Ursachen:\n` +
+            `  • Der NBI Service ist nicht aktiviert\n` +
+            `  • Die IP-Adresse ist falsch\n` +
+            `  • CSM verwendet eine andere Port/Pfad-Konfiguration\n\n` +
+            `Lösungen:\n` +
+            `  1️⃣ Prüfen Sie in CSM: Administration → License → NBI Service\n` +
+            `  2️⃣ Verifizieren Sie die IP-Adresse: ${ip}\n` +
+            `  3️⃣ Prüfen Sie die CSM-Logs: $CSM_HOME/log/nbi.log`);
+          results.push(`Login-Test: ✗ HTTP 404 - Nicht gefunden`);
+          return false;
+        } else if (result.status === 503) {
+          // Service unavailable
+          failedTests++;
+          addLog('error', '❌ NBI Service nicht verfügbar', 
+            `HTTP 503 - Der Service antwortet nicht (${duration}ms)\n\n` +
+            `Mögliche Ursachen:\n` +
+            `  • Der NBI Service ist gestoppt\n` +
+            `  • Der CSM Server ist überlastet\n` +
+            `  • Port 1741 ist blockiert\n\n` +
+            `Lösungen:\n` +
+            `  1️⃣ Starten Sie den CSM NBI Service neu\n` +
+            `  2️⃣ Prüfen Sie die CSM-Logs: $CSM_HOME/log/nbi.log\n` +
+            `  3️⃣ Überprüfen Sie die Firewall-Regeln für Port 1741`);
+          results.push(`Login-Test: ✗ HTTP 503 - Service nicht verfügbar`);
+          return false;
+        } else {
+          // Other error
+          failedTests++;
+          addLog('error', '❌ Login fehlgeschlagen', 
+            `HTTP ${result.status} - ${result.message || 'Unbekannter Fehler'} (${duration}ms)`);
+          results.push(`Login-Test: ✗ HTTP ${result.status}`);
+          return false;
         }
-        
-        return true;
       } catch (error: any) {
         failedTests++;
+        const duration = Date.now() - startTime;
         const errorInfo = analyzeError(error);
-        addLog('error', `❌ ${label}`, `URL: ${url}\nFehler: ${errorInfo.short}\n\nDetails:\n${errorInfo.detailed}`);
-        results.push(`${label}: ✗ ${errorInfo.short}`);
+        
+        addLog('error', '❌ Login-Test fehlgeschlagen', 
+          `Dauer: ${duration}ms\n` +
+          `Fehler: ${errorInfo.short}\n\n` +
+          `Details:\n${errorInfo.detailed}`);
+        results.push(`Login-Test: ✗ ${errorInfo.short}`);
         return false;
       }
     };
 
-    // Test alle Endpunkte
-    addLog('info', '🔍 Phase 1: Teste Standard-Endpunkte', 'Prüfe HTTPS /nbi und /nbi/login...');
-    for (const endpoint of endpoints) {
-      await testEndpoint(endpoint.url, endpoint.label, endpoint.method);
-      // Kleine Pause zwischen Tests
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
+    // Run the actual login test
+    await testLoginEndpoint();
 
     // Zusätzliche Diagnose-Informationen
     addLog('info', '💻 Browser- und Netzwerk-Umgebung', 
@@ -231,68 +283,50 @@ export const ConnectionPanel = ({
         '→ Deaktivieren Sie "TLS-Zertifikat verifizieren" in den Verbindungseinstellungen');
     }
 
-    // Zusammenfassung mit Details
-    const successRate = ((totalTests - failedTests) / totalTests * 100).toFixed(0);
+    // Summary
+    const successRate = totalTests > 0 ? ((totalTests - failedTests) / totalTests * 100).toFixed(0) : '0';
+    
+    addLog('info', '💻 Browser- und Netzwerk-Umgebung', 
+      `Browser: ${navigator.userAgent.substring(0, 100)}...\n` +
+      `Protokoll: ${window.location.protocol}\n` +
+      `Host: ${window.location.host}\n` +
+      `Verbindung: ${(navigator as any).connection?.effectiveType || 'unbekannt'}\n` +
+      `Online-Status: ${navigator.onLine ? '✅ Online' : '❌ Offline'}`);
+    
     addLog('info', '📊 Diagnose Zusammenfassung', 
-      `Tests durchgeführt: ${totalTests}\n` +
-      `Erfolgreich: ${totalTests - failedTests}\n` +
-      `Fehlgeschlagen: ${failedTests}\n` +
+      `Login-Endpunkte getestet: ${totalTests}\n` +
+      `Funktionsfähig: ${totalTests - failedTests}\n` +
+      `Nicht verfügbar: ${failedTests}\n` +
       `Erfolgsquote: ${successRate}%\n\n` +
       `Ergebnisse:\n${results.join('\n')}`);
 
     if (successfulEndpoint) {
-      addLog('success', '✅ Erfolgreicher Endpunkt gefunden', 
-        `Mindestens ein Endpunkt ist erreichbar:\n${successfulEndpoint}\n\n` +
-        'Die CSM-Verbindung sollte möglich sein. Versuchen Sie nun die Anmeldung mit Ihren Zugangsdaten.');
-    }
-
-    // Spezifische Troubleshooting-Schritte basierend auf Fehlern
-    if (failedTests === totalTests) {
-      addLog('error', '❌ Alle Tests fehlgeschlagen', 
-        'Keine Verbindung zum CSM möglich. Kritische Probleme erkannt.');
-        
-      addLog('warning', '🔧 Diagnose: Mögliche Ursachen', 
-        '1. ❌ CSM Server ist offline oder reagiert nicht\n' +
-        '2. ❌ Falsche IP-Adresse (aktuell: ' + ip + ')\n' +
-        '3. ❌ Firewall blockiert alle Ports (443, 1741)\n' +
-        '4. ❌ Netzwerk-Routing-Problem zwischen Client und Server\n' +
-        '5. ❌ CSM NBI Service ist nicht aktiviert oder installiert\n' +
-        '6. ❌ TLS-Zertifikatsfehler (selbstsigniert)');
-        
-      addLog('info', '🛠️ Empfohlene Schritte (in dieser Reihenfolge)',
-        '1️⃣ IP-Adresse prüfen:\n' +
-        '   • Ist ' + ip + ' die richtige Adresse?\n' +
-        '   • Ping-Test: ping ' + ip + '\n\n' +
-        '2️⃣ Port-Erreichbarkeit prüfen:\n' +
-        '   • HTTPS Port 443: telnet ' + ip + ' 443\n' +
-        '   • HTTP Port 1741: telnet ' + ip + ' 1741\n\n' +
-        '3️⃣ CSM Web-Interface testen:\n' +
-        '   • Browser: https://' + ip + '/login\n' +
-        '   • Funktioniert die normale Anmeldung?\n\n' +
-        '4️⃣ CSM NBI Service prüfen:\n' +
-        '   • CSM GUI: Administration → License → NBI\n' +
-        '   • Ist die NBI-Lizenz aktiviert?\n' +
-        '   • Ist der NBI Service gestartet?\n\n' +
-        '5️⃣ TLS-Zertifikat:\n' +
-        '   • Deaktivieren Sie "TLS-Zertifikat verifizieren"\n' +
-        '   • Oder installieren Sie ein gültiges Zertifikat\n\n' +
-        '6️⃣ Firewall-Regeln:\n' +
-        '   • Erlauben Sie Port 443 und 1741\n' +
-        '   • Prüfen Sie iptables/firewalld auf dem CSM\n\n' +
-        '7️⃣ CSM Logs analysieren:\n' +
-        '   • $CSM_HOME/log/nbi.log\n' +
-        '   • $CSM_HOME/log/CSCOpx.log');
-    } else if (failedTests > 0) {
-      addLog('warning', '⚠️ Teilweise Verbindung', 
-        `${failedTests} von ${totalTests} Tests sind fehlgeschlagen.\n\n` +
-        'Empfehlungen:\n' +
-        '• Versuchen Sie die Anmeldung - sie könnte trotzdem funktionieren\n' +
-        '• Falls die Anmeldung fehlschlägt, deaktivieren Sie die TLS-Verifizierung\n' +
-        '• Prüfen Sie ob der erfolgreiche Endpunkt vom CSM unterstützt wird');
-    } else {
-      addLog('success', '✅ Alle Tests erfolgreich', 
-        'Alle Netzwerk-Tests waren erfolgreich!\n\n' +
+      addLog('success', '✅ Funktionierender Login-Endpunkt gefunden!', 
+        `Der CSM Server ist bereit für Login-Anfragen\n` +
+        `Endpunkt: ${successfulEndpoint}\n\n` +
         '➡️ Nächster Schritt: Klicken Sie auf "Verbinden" und geben Sie Ihre CSM-Zugangsdaten ein.');
+      
+      addLog('success', '✅ Diagnose erfolgreich', 
+        'Der CSM NBI Service ist erreichbar und funktioniert!\n' +
+        `Erfolgsquote: ${successRate}%`);
+    } else {
+      // All tests failed
+      addLog('error', '❌ Verbindung fehlgeschlagen', 
+        'Kein CSM NBI Login-Endpunkt konnte erreicht werden\n' +
+        'Alle getesteten Endpunkte sind nicht verfügbar');
+        
+      addLog('error', '🔍 HTTP 404 - Endpunkte nicht gefunden', 
+        'Mögliche Ursachen:\n' +
+        '  ❌ Der NBI Service ist nicht aktiviert\n' +
+        '  ❌ Die IP-Adresse ist falsch\n' +
+        '  ❌ CSM verwendet eine andere Port/Pfad-Konfiguration\n\n' +
+        'Lösungen:\n' +
+        '  1️⃣ Prüfen Sie in CSM: Administration → License → NBI Service\n' +
+        '  2️⃣ Verifizieren Sie die IP-Adresse: ' + ip + '\n' +
+        '  3️⃣ Prüfen Sie die CSM-Logs: $CSM_HOME/log/nbi.log\n' +
+        '  4️⃣ Versuchen Sie, ob der Standard-Port 1741 blockiert ist\n\n' +
+        '  5️⃣ Testen Sie CSM Web-Interface: https://' + ip + '/login\n' +
+        '  6️⃣ Port-Erreichbarkeit: telnet ' + ip + ' 443 && telnet ' + ip + ' 1741');
     }
   };
 
