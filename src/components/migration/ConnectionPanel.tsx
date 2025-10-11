@@ -177,17 +177,25 @@ export const ConnectionPanel = ({
         const timer = setTimeout(() => controller.abort(), timeoutMs);
         
         // Try actual login via proxy to test real behavior
-        const response = await fetch('/api/login', {
+        const isLocal = import.meta.env.DEV;
+        const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/csm-proxy`;
+        const url = isLocal ? '/api/login' : functionUrl;
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (!isLocal) {
+          const pk = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
+          headers['apikey'] = pk;
+          headers['Authorization'] = `Bearer ${pk}`;
+        }
+        const payload = isLocal
+          ? { ipAddress: ip, username: 'diagnostic-test', password: 'diagnostic-test', verifyTls: csmConnection.verifyTls }
+          : { action: 'login', ipAddress: ip, username: 'diagnostic-test', password: 'diagnostic-test', verifyTls: csmConnection.verifyTls };
+
+        const response = await fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
+          headers,
+          credentials: isLocal ? 'include' : 'omit',
           signal: controller.signal,
-          body: JSON.stringify({
-            ipAddress: ip,
-            username: 'diagnostic-test',
-            password: 'diagnostic-test',
-            verifyTls: csmConnection.verifyTls
-          })
+          body: JSON.stringify(payload)
         });
         
         clearTimeout(timer);

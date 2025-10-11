@@ -32,8 +32,10 @@ interface CSMCLIQuery {
 
 export class CSMClient {
   private session: CSMSession | null = null;
-  private apiLoginUrl = '/api/login';
-  private proxyUrl = '/csm-proxy';
+  private isLocal = import.meta.env.DEV;
+  private functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/csm-proxy`;
+  private apiLoginUrl = '/api/login'; // local dev
+  private proxyUrl = '/csm-proxy'; // local dev
 
   async login({ ipAddress, username, password, verifyTls }: CSMLoginRequest): Promise<boolean> {
     console.log('🔐 CSM Login via local proxy', { 
@@ -43,11 +45,24 @@ export class CSMClient {
     });
     
     try {
-      const response = await fetch(this.apiLoginUrl, {
+      const isLocal = this.isLocal;
+      const url = isLocal ? this.apiLoginUrl : this.functionUrl;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (!isLocal) {
+        const pk = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
+        headers['apikey'] = pk;
+        headers['Authorization'] = `Bearer ${pk}`;
+      }
+
+      const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include', // Enable cookie handling
-        body: JSON.stringify({ ipAddress, username, password, verifyTls })
+        headers,
+        credentials: isLocal ? 'include' : 'omit', // cookies only for local proxy
+        body: JSON.stringify(
+          isLocal
+            ? { ipAddress, username, password, verifyTls }
+            : { action: 'login', ipAddress, username, password, verifyTls }
+        )
       });
       
       const result = await response.json();
@@ -127,10 +142,19 @@ export class CSMClient {
       .replace('/nbi/v1', '')
       .replace('/nbi', '');
     
-    const response = await fetch(this.proxyUrl, {
+    const isLocal = this.isLocal;
+    const url = isLocal ? this.proxyUrl : this.functionUrl;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (!isLocal) {
+      const pk = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
+      headers['apikey'] = pk;
+      headers['Authorization'] = `Bearer ${pk}`;
+    }
+
+    const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include', // Enable cookie handling
+      headers,
+      credentials: isLocal ? 'include' : 'omit', // cookies only for local proxy
       body: JSON.stringify({ action: 'request', ipAddress, endpoint, body })
     });
     
@@ -217,10 +241,19 @@ export class CSMClient {
       .replace('/nbi', '');
     
     try {
-      const response = await fetch(this.proxyUrl, {
+      const isLocal = this.isLocal;
+      const url = isLocal ? this.proxyUrl : this.functionUrl;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (!isLocal) {
+        const pk = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
+        headers['apikey'] = pk;
+        headers['Authorization'] = `Bearer ${pk}`;
+      }
+
+      const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include', // Enable cookie handling
+        headers,
+        credentials: isLocal ? 'include' : 'omit', // cookies only for local proxy
         body: JSON.stringify({ action: 'logout', ipAddress })
       });
       
