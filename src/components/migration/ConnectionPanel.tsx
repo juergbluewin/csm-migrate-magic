@@ -213,43 +213,55 @@ export const ConnectionPanel = ({
           return true;
         } else if (result.status === 401 || result.status === 400 || result.status === 423) {
           // Authentication error - endpoint exists and responds, just wrong credentials
-          addLog('success', '✅ Login-Endpunkt erreichbar', 
-            `HTTP ${result.status} - Der Endpunkt funktioniert! (${duration}ms)\n` +
-            `Fehler: ${result.message || 'Login fehlgeschlagen'}\n\n` +
-            `Dies ist normal für Test-Zugangsdaten. Der Endpunkt funktioniert!\n` +
-            `➡️ Verwenden Sie Ihre echten CSM-Zugangsdaten für die Verbindung.`);
-          results.push(`Login-Test: ⚠️ Endpunkt OK, Test-Login fehlgeschlagen (${duration}ms)`);
-          if (!successfulEndpoint) successfulEndpoint = `https://${ip}/nbi/login`;
+          addLog('success', '✅ NBI API erreichbar und funktioniert', 
+            `HTTP ${result.status} - Der NBI API-Endpunkt antwortet korrekt! (${duration}ms)\n\n` +
+            `📍 Bestätigt:\n` +
+            `  • NBI Service läuft auf ${ip}\n` +
+            `  • API-Endpunkt /nbi/ ist erreichbar\n` +
+            `  • Status ${result.status} ist erwartbar bei Test-Credentials\n\n` +
+            `ℹ️ Hinweis:\n` +
+            `Das Web-Interface (https://${ip}/login) ist eine separate Schnittstelle.\n` +
+            `Diese App nutzt die NBI API (https://${ip}/nbi/).\n\n` +
+            `➡️ Nächster Schritt: Melden Sie sich mit Ihren echten CSM-Zugangsdaten an.`);
+          results.push(`NBI API Test: ✓ Erreichbar (${duration}ms)`);
+          if (!successfulEndpoint) successfulEndpoint = `https://${ip}/nbi/`;
           return true;
         } else if (result.status === 404) {
           // Not found - endpoint doesn't exist
           failedTests++;
-          addLog('error', '❌ Login-Endpunkt nicht gefunden', 
-            `HTTP 404 - Der NBI Service-Endpunkt existiert nicht (${duration}ms)\n\n` +
-            `Mögliche Ursachen:\n` +
-            `  • Der NBI Service ist nicht aktiviert\n` +
-            `  • Die IP-Adresse ist falsch\n` +
-            `  • CSM verwendet eine andere Port/Pfad-Konfiguration\n\n` +
-            `Lösungen:\n` +
-            `  1️⃣ Prüfen Sie in CSM: Administration → License → NBI Service\n` +
-            `  2️⃣ Verifizieren Sie die IP-Adresse: ${ip}\n` +
-            `  3️⃣ Prüfen Sie die CSM-Logs: $CSM_HOME/log/nbi.log`);
-          results.push(`Login-Test: ✗ HTTP 404 - Nicht gefunden`);
+          addLog('error', '❌ NBI API nicht gefunden', 
+            `HTTP 404 - Der NBI API-Endpunkt existiert nicht (${duration}ms)\n\n` +
+            `⚠️ WICHTIG: CSM hat zwei getrennte Schnittstellen:\n\n` +
+            `🌐 Web-Interface (Browser):\n` +
+            `   https://${ip}/login\n` +
+            `   → Für manuelle Anmeldung im Browser\n\n` +
+            `🔌 NBI API (Programmatisch):\n` +
+            `   https://${ip}/nbi/\n` +
+            `   oder http://${ip}:1741/nbi/\n` +
+            `   → Für diese Migration-Tool\n\n` +
+            `❌ Aktuelles Problem:\n` +
+            `Der NBI API-Endpunkt ist nicht erreichbar.\n\n` +
+            `✅ Lösungen:\n` +
+            `  1️⃣ Administration → License → NBI Service aktivieren\n` +
+            `  2️⃣ NBI Service neu starten: $CSM_HOME/bin/pdtool nbi restart\n` +
+            `  3️⃣ Logs prüfen: $CSM_HOME/log/nbi.log\n` +
+            `  4️⃣ Port-Erreichbarkeit: telnet ${ip} 1741`);
+          results.push(`NBI API Test: ✗ HTTP 404 - Nicht gefunden`);
           return false;
         } else if (result.status === 503) {
           // Service unavailable
           failedTests++;
           addLog('error', '❌ NBI Service nicht verfügbar', 
-            `HTTP 503 - Der Service antwortet nicht (${duration}ms)\n\n` +
-            `Mögliche Ursachen:\n` +
-            `  • Der NBI Service ist gestoppt\n` +
-            `  • Der CSM Server ist überlastet\n` +
-            `  • Port 1741 ist blockiert\n\n` +
+            `HTTP 503 - Der NBI Service antwortet nicht (${duration}ms)\n\n` +
+            `Der CSM NBI Service läuft nicht (Web-Interface läuft möglicherweise)\n\n` +
+            `Unterschied:\n` +
+            `  • Web-Interface: https://${ip}/login (läuft vermutlich)\n` +
+            `  • NBI API: https://${ip}/nbi/ (nicht erreichbar)\n\n` +
             `Lösungen:\n` +
-            `  1️⃣ Starten Sie den CSM NBI Service neu\n` +
-            `  2️⃣ Prüfen Sie die CSM-Logs: $CSM_HOME/log/nbi.log\n` +
-            `  3️⃣ Überprüfen Sie die Firewall-Regeln für Port 1741`);
-          results.push(`Login-Test: ✗ HTTP 503 - Service nicht verfügbar`);
+            `  1️⃣ NBI Service starten: $CSM_HOME/bin/pdtool nbi start\n` +
+            `  2️⃣ Status prüfen: $CSM_HOME/bin/pdtool nbi status\n` +
+            `  3️⃣ Logs prüfen: $CSM_HOME/log/nbi.log`);
+          results.push(`NBI API Test: ✗ HTTP 503 - Service nicht verfügbar`);
           return false;
         } else {
           // Other error
