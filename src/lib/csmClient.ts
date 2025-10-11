@@ -128,8 +128,7 @@ export class CSMClient {
         <offset>${offset}</offset>
       </getPolicyObjectsListByTypeRequest>`;
 
-    const ipAddress = this.session.baseUrl.replace('https://', '').replace('/nbi', '');
-    return this.request('/configservice/getPolicyObjectsListByType', requestXml);
+    return this.request('/v1/configservice/getPolicyObjectsListByType', requestXml);
   }
 
   private async request(endpoint: string, body: string) {
@@ -196,7 +195,7 @@ export class CSMClient {
         </${wrapperTag}>
       </getPolicyObjectRequest>`;
 
-    return this.request('/configservice/getPolicyObject', requestXml);
+    return this.request('/v1/configservice/getPolicyObject', requestXml);
   }
 
   async getPolicyConfigByName(policyName: string, policyType: string = 'DeviceAccessRuleFirewallPolicy') {
@@ -206,7 +205,7 @@ export class CSMClient {
         <policyType>${policyType}</policyType>
       </getPolicyConfigByNameRequest>`;
 
-    return this.request('/configservice/getPolicyConfigByName', requestXml);
+    return this.request('/v1/configservice/getPolicyConfigByName', requestXml);
   }
 
   async getPolicyConfigByDeviceGID(deviceGID: string, policyType: string = 'DeviceAccessRuleFirewallPolicy') {
@@ -216,7 +215,7 @@ export class CSMClient {
         <policyType>${policyType}</policyType>
       </getPolicyConfigByDeviceGIDRequest>`;
 
-    return this.request('/configservice/getPolicyConfigByDeviceGID', requestXml);
+    return this.request('/v1/configservice/getPolicyConfigByDeviceGID', requestXml);
   }
 
   async execDeviceReadOnlyCLICmds({ deviceIP, command, argument }: CSMCLIQuery) {
@@ -227,7 +226,7 @@ export class CSMClient {
         ${argument ? `<argument>${argument}</argument>` : ''}
       </execDeviceReadOnlyCLICmdsRequest>`;
 
-    return this.request('/utilservice/execDeviceReadOnlyCLICmds', requestXml);
+    return this.request('/v1/utilservice/execDeviceReadOnlyCLICmds', requestXml);
   }
 
   async logout() {
