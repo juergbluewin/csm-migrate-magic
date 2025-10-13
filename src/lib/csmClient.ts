@@ -33,7 +33,10 @@ interface CSMCLIQuery {
 export class CSMClient {
   private session: CSMSession | null = null;
   private isLocal = import.meta.env.DEV;
-  private functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/csm-proxy`;
+  // Fallback to hardcoded values if env vars are not available in production
+  private supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://wlupuoyuccrwvfpabvli.supabase.co';
+  private supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsdXB1b3l1Y2Nyd3ZmcGFidmxpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgwNTcxMDMsImV4cCI6MjA3MzYzMzEwM30.Jp0oYNxRJPIEhzPFxxrVSVZ9er-etYE5GtDONfdjUPA';
+  private functionUrl = `${this.supabaseUrl}/functions/v1/csm-proxy`;
   private apiLoginUrl = '/api/login'; // local dev
   private proxyUrl = '/csm-proxy'; // local dev
 
@@ -49,9 +52,8 @@ export class CSMClient {
       const url = isLocal ? this.apiLoginUrl : this.functionUrl;
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (!isLocal) {
-        const pk = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
-        headers['apikey'] = pk;
-        headers['Authorization'] = `Bearer ${pk}`;
+        headers['apikey'] = this.supabaseKey;
+        headers['Authorization'] = `Bearer ${this.supabaseKey}`;
       }
 
       const response = await fetch(url, {
@@ -145,9 +147,8 @@ export class CSMClient {
     const url = isLocal ? this.proxyUrl : this.functionUrl;
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (!isLocal) {
-      const pk = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
-      headers['apikey'] = pk;
-      headers['Authorization'] = `Bearer ${pk}`;
+      headers['apikey'] = this.supabaseKey;
+      headers['Authorization'] = `Bearer ${this.supabaseKey}`;
     }
 
     const response = await fetch(url, {
@@ -244,9 +245,8 @@ export class CSMClient {
       const url = isLocal ? this.proxyUrl : this.functionUrl;
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (!isLocal) {
-        const pk = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
-        headers['apikey'] = pk;
-        headers['Authorization'] = `Bearer ${pk}`;
+        headers['apikey'] = this.supabaseKey;
+        headers['Authorization'] = `Bearer ${this.supabaseKey}`;
       }
 
       const response = await fetch(url, {
