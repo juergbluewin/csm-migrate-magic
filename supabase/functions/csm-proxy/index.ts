@@ -62,7 +62,9 @@ serve(async (req) => {
     }
 
     if (action === 'logout') {
-      const baseUrl = `https://${ipAddress}/nbi`;
+      const protocol = verifyTls ? 'https' : 'http';
+      const port = verifyTls ? '' : ':1741';
+      const baseUrl = `${protocol}://${ipAddress}${port}/nbi`;
       const logoutXml = `<?xml version="1.0" encoding="UTF-8"?>
 <csm:logoutRequest xmlns:csm="csm"/>`;
       
@@ -131,7 +133,9 @@ serve(async (req) => {
   <password>${password}</password>
 </loginRequest>`;
 
-      const baseUrl = `https://${ipAddress}/nbi`;
+      const protocol = verifyTls ? 'https' : 'http';
+      const port = verifyTls ? '' : ':1741';
+      const baseUrl = `${protocol}://${ipAddress}${port}/nbi`;
       
       console.log(`[${requestId}] 🔐 Attempting CSM login to ${baseUrl}/login`);
       const fetchStart = Date.now();
@@ -234,7 +238,9 @@ serve(async (req) => {
     }
 
     if (action === 'request' && endpoint) {
-      const baseUrl = `https://${ipAddress}/nbi`;
+      const protocol = verifyTls ? 'https' : 'http';
+      const port = verifyTls ? '' : ':1741';
+      const baseUrl = `${protocol}://${ipAddress}${port}/nbi`;
       const fullUrl = endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint}`;
       
       console.log(`[${requestId}] 📤 CSM API Request to ${fullUrl}`);
