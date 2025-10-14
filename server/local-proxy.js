@@ -13,12 +13,15 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Default candidates for NBI endpoint discovery (prioritize HTTP 1741/v1)
+// Default candidates for NBI endpoint discovery
+// Prioritize HTTP :1741 for self-signed cert environments
 const DEFAULT_CANDIDATES = (ip) => [
-  `https://${ip}/nbi`,
-  `https://${ip}/nbi/v1`,
   `http://${ip}:1741/nbi`,
   `http://${ip}:1741/nbi/v1`,
+  `http://${ip}:1741`,
+  `https://${ip}/nbi`,
+  `https://${ip}/nbi/v1`,
+  `https://${ip}:443/nbi`,
 ];
 
 // Manual base URL override from environment
@@ -37,7 +40,7 @@ app.use((req, res, next) => {
     res.header('Access-Control-Allow-Credentials', 'true');
   }
   res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, apikey, x-client-info');
   res.header('Access-Control-Expose-Headers', 'Set-Cookie, Content-Type');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
@@ -45,6 +48,11 @@ app.use((req, res, next) => {
 
 
 app.use(express.json({ limit: '2mb' }));
+
+// Health check endpoint for Docker
+app.get('/healthz', (req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
 
 // Session-Speicher: IP -> { cookie, baseUrl, lastUsed }
 const sessions = new Map();

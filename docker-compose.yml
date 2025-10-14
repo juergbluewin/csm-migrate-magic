@@ -5,9 +5,17 @@ services:
     build: .
     ports:
       - "3000:3000"
-    
+    env_file:
+      - .env
     environment:
       - NODE_ENV=production
-      - CSM_BASEURL=https://10.240.74.156/nbi
+      - CSM_BASEURL=http://10.240.74.156:1741/nbi
       - CSM_VERIFY_TLS=false
+      - CORS_ALLOW_ORIGIN=http://localhost:8080
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
     restart: unless-stopped

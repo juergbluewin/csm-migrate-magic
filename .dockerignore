@@ -4,9 +4,14 @@ dist
 .git
 .gitignore
 README.md
-.env
 .nyc_output
 coverage
-.nyc_output
 .vscode
 .DS_Store
+*.log
+.env.local
+.env.*.local
+*.swp
+*.swo
+*~
+.idea

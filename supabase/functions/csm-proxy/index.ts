@@ -133,104 +133,114 @@ serve(async (req) => {
   <password>${password}</password>
 </loginRequest>`;
 
-      const protocol = verifyTls ? 'https' : 'http';
-      const port = verifyTls ? '' : ':1741';
-      const baseUrl = `${protocol}://${ipAddress}${port}/nbi`;
-      
-      console.log(`[${requestId}] 🔐 Attempting CSM login to ${baseUrl}/login`);
-      const fetchStart = Date.now();
-      
-      const response = await fetch(`${baseUrl}/login`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/xml',
-          'Accept': 'application/xml',
-        },
-        body: loginXml,
-      });
+      // Endpoint-Discovery: Mehrere Kandidaten testen
+      const candidates = verifyTls 
+        ? [
+            `https://${ipAddress}/nbi`,
+            `https://${ipAddress}/nbi/v1`,
+            `https://${ipAddress}:443/nbi`,
+          ]
+        : [
+            `http://${ipAddress}:1741/nbi`,
+            `http://${ipAddress}:1741/nbi/v1`,
+            `http://${ipAddress}:1741`,
+            `http://${ipAddress}/nbi`,
+          ];
 
-      const fetchDuration = Date.now() - fetchStart;
-      const responseText = await response.text();
-      const headers = Object.fromEntries(response.headers.entries());
-      
-      console.log(`[${requestId}] ✅ CSM Response:`, {
-        status: response.status,
-        ok: response.ok,
-        duration: `${fetchDuration}ms`,
-        hasSetCookie: !!headers['set-cookie']
-      });
+      let lastResponse = null;
+      let lastResponseText = '';
+      let lastUrl = '';
 
-      // Cookie zusammenführen und speichern
-      const setCookieHeader = headers['set-cookie'];
-      if (setCookieHeader && response.ok) {
-        const cookieParts = [];
-        const cookies = Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader];
-        for (const c of cookies) {
-          const match = /^([^=]+)=([^;]+)/.exec(c);
-          if (match) cookieParts.push(`${match[1]}=${match[2]}`);
-        }
-        const mergedCookie = cookieParts.join('; ');
-        sessions.set(ipAddress, { cookie: mergedCookie, lastUsed: Date.now() });
-      }
-
-      // Bei Error Code 29: logout, warten, retry
-      if (/<error><code>29<\/code>/i.test(responseText)) {
-        console.log(`[${requestId}] ⚠️ Error Code 29 detected - attempting cleanup and retry`);
+      for (const baseUrl of candidates) {
+        const loginUrl = `${baseUrl}/login`;
+        lastUrl = loginUrl;
         
-        // Logout
-        const logoutXml = `<?xml version="1.0" encoding="UTF-8"?><csm:logoutRequest xmlns:csm="csm"/>`;
+        console.log(`[${requestId}] 🔐 Testing CSM login at ${loginUrl}`);
+        
         try {
-          await fetch(`${baseUrl}/logout`, {
+          const fetchStart = Date.now();
+          const response = await fetch(loginUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/xml', 'Accept': 'application/xml' },
-            body: logoutXml,
+            headers: {
+              'Content-Type': 'application/xml',
+              'Accept': 'application/xml',
+            },
+            body: loginXml,
           });
-        } catch {}
-        
-        sessions.delete(ipAddress);
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // Retry login
-        const retryResponse = await fetch(`${baseUrl}/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/xml', 'Accept': 'application/xml' },
-          body: loginXml,
-        });
-        const retryText = await retryResponse.text();
-        const retryHeaders = Object.fromEntries(retryResponse.headers.entries());
-        
-        if (retryResponse.ok) {
-          const retryCookie = retryHeaders['set-cookie'];
-          if (retryCookie) {
-            const cookieParts = [];
-            const cookies = Array.isArray(retryCookie) ? retryCookie : [retryCookie];
-            for (const c of cookies) {
-              const match = /^([^=]+)=([^;]+)/.exec(c);
-              if (match) cookieParts.push(`${match[1]}=${match[2]}`);
-            }
-            const mergedCookie = cookieParts.join('; ');
-            sessions.set(ipAddress, { cookie: mergedCookie, lastUsed: Date.now() });
+
+          const fetchDuration = Date.now() - fetchStart;
+          const responseText = await response.text();
+          const headers = Object.fromEntries(response.headers.entries());
+          
+          lastResponse = response;
+          lastResponseText = responseText;
+          
+          console.log(`[${requestId}] CSM Response from ${loginUrl}:`, {
+            status: response.status,
+            ok: response.ok,
+            duration: `${fetchDuration}ms`,
+            hasSetCookie: !!headers['set-cookie'],
+            hasError: /<\s*error\b/i.test(responseText)
+          });
+
+          // Bei Error Code 29: logout, warten, retry
+          if (/<error><code>29<\/code>/i.test(responseText)) {
+            console.log(`[${requestId}] ⚠️ Error Code 29 at ${loginUrl} - skipping to next candidate`);
+            continue;
           }
+
+          // Erfolg: 2xx ohne <error>
+          if (response.status >= 200 && response.status < 300 && !/<\s*error\b/i.test(responseText)) {
+            const setCookieHeader = headers['set-cookie'];
+            if (setCookieHeader) {
+              const cookieParts = [];
+              const cookies = Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader];
+              for (const c of cookies) {
+                const match = /^([^=]+)=([^;]+)/.exec(c);
+                if (match) cookieParts.push(`${match[1]}=${match[2]}`);
+              }
+              const mergedCookie = cookieParts.join('; ');
+              sessions.set(ipAddress, { cookie: mergedCookie, lastUsed: Date.now() });
+            }
+            
+            console.log(`[${requestId}] ✅ CSM Login successful via ${loginUrl}`);
+            return new Response(JSON.stringify({
+              ok: true,
+              status: response.status,
+              statusText: response.statusText,
+              body: responseText,
+              headers: headers,
+            }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              status: 200,
+            });
+          }
+
+          // Fehler mit Anwendungscode -> nächster Kandidat
+          if (/<\s*error\b/i.test(responseText)) {
+            console.log(`[${requestId}] ⚠️ CSM application error at ${loginUrl}, trying next candidate`);
+            continue;
+          }
+
+          // 4xx/5xx -> nächster Kandidat
+          if (response.status >= 400) {
+            console.log(`[${requestId}] ⚠️ HTTP ${response.status} at ${loginUrl}, trying next candidate`);
+            continue;
+          }
+
+        } catch (error: any) {
+          console.log(`[${requestId}] ⚠️ Network error at ${loginUrl}: ${error.message}`);
+          continue;
         }
-        
-        return new Response(JSON.stringify({
-          ok: retryResponse.ok,
-          status: retryResponse.status,
-          statusText: retryResponse.statusText,
-          body: retryText,
-          headers: retryHeaders,
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 200,
-        });
       }
-      
+
+      // Alle Kandidaten fehlgeschlagen
+      console.error(`[${requestId}] ❌ CSM NBI nicht erreichbar. Letzter Versuch: ${lastUrl}`);
       return new Response(JSON.stringify({
-        ok: response.ok,
-        status: response.status,
-        statusText: response.statusText,
-        body: responseText,
-        headers: headers,
+        ok: false,
+        status: lastResponse?.status || 503,
+        statusText: `CSM NBI Service nicht verfügbar (letzter Versuch: ${lastUrl})`,
+        body: lastResponseText,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 200,
