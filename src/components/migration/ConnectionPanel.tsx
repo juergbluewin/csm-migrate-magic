@@ -178,15 +178,18 @@ export const ConnectionPanel = ({
         
         // Try actual login via proxy to test real behavior
         const isLocal = import.meta.env.DEV;
+        const proxyBase = (import.meta.env.VITE_PROXY_URL as string | undefined) || '';
         const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/csm-proxy`;
-        const url = isLocal ? '/api/login' : functionUrl;
+        const url = proxyBase
+          ? proxyBase.replace(/\/csm-proxy\/?$/, '/api/login')
+          : (isLocal ? '/api/login' : functionUrl);
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-        if (!isLocal) {
+        if (!proxyBase && !isLocal) {
           const pk = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
           headers['apikey'] = pk;
           headers['Authorization'] = `Bearer ${pk}`;
         }
-        const payload = isLocal
+        const payload = (proxyBase || isLocal)
           ? { ipAddress: ip, username: 'diagnostic-test', password: 'diagnostic-test', verifyTls: csmConnection.verifyTls }
           : { action: 'login', ipAddress: ip, username: 'diagnostic-test', password: 'diagnostic-test', verifyTls: csmConnection.verifyTls };
 

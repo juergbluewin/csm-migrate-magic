@@ -27,14 +27,13 @@ const DEFAULT_CANDIDATES = (ip) => [
 // Manual base URL override from environment
 const OVERRIDE_BASE = process.env.CSM_BASEURL?.replace(/\/+$/, '');
 
-// CORS configuration for Same-Origin policy
-const ORIGIN_WHITELIST = new Set([
-  'http://localhost:3000',
-  'http://127.0.0.1:3000',
-]);
+// CORS configuration
+const CORS_ALLOW_ORIGIN = process.env.CORS_ALLOW_ORIGIN || 'http://localhost:3000';
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin && ORIGIN_WHITELIST.has(origin)) {
+  if (CORS_ALLOW_ORIGIN === '*') {
+    res.header('Access-Control-Allow-Origin', '*');
+  } else if (origin && origin === CORS_ALLOW_ORIGIN) {
     res.header('Access-Control-Allow-Origin', origin);
     res.header('Vary', 'Origin');
     res.header('Access-Control-Allow-Credentials', 'true');
@@ -154,9 +153,11 @@ app.post('/csm-proxy', async (req, res) => {
   }
 
   const agent = new https.Agent({ rejectUnauthorized: verifyTls === true });
-  const protocol = 'https';
-  const port = '';
-  const baseUrl = `${protocol}://${ipAddress}${port}/nbi`;
+  // Determine base URL: prefer discovered hint, then override, then sensible default (http:1741)
+  const overrideBase = OVERRIDE_BASE ? OVERRIDE_BASE.replace(/\/$/, '') : null;
+  const baseUrl = (loginHints.get(ipAddress)?.baseUrl)
+    || (overrideBase ? overrideBase.replace(/\/v1$/, '') : null)
+    || `http://${ipAddress}:1741/nbi`;
 
   return serialize(ipAddress, async () => {
     try {
@@ -164,7 +165,7 @@ app.post('/csm-proxy', async (req, res) => {
         if (action === 'logout') {
           console.log(`[${requestId}] 🚪 Logout for ${ipAddress}`);
           const hint = loginHints.get(ipAddress);
-          const logoutBase = hint?.baseUrl || baseUrl;
+          const logoutBase = (hint?.baseUrl) || (OVERRIDE_BASE ? OVERRIDE_BASE.replace(/\/v1$/, '') : baseUrl);
           await cleanupSession(ipAddress, logoutBase, agent);
           return res.json({ ok: true, status: 200, statusText: 'Logged out', body: '<logout/>' });
         }
@@ -311,7 +312,8 @@ const candidateBases = OVERRIDE_BASE ? expandOverride(OVERRIDE_BASE) : DEFAULT_C
         if (!hint?.baseUrl) return res.status(401).json({ ok: false, status: 401, statusText: 'Keine Session' });
 
         const endpointPath = endpoint.startsWith('/nbi/') ? endpoint.replace(/^\/nbi/, '') : endpoint;
-        const url = `${hint.baseUrl}${endpointPath.startsWith('/') ? '' : '/'}${endpointPath}`;
+        const base = hint.baseUrl || (OVERRIDE_BASE || `http://${ipAddress}:1741/nbi`);
+        const url = `${base}${endpointPath.startsWith('/') ? '' : '/'}${endpointPath}`;
 
         const session = sessions.get(ipAddress);
         const cookieStr = session?.cookie || '';
@@ -531,8 +533,8 @@ app.post('/proxy/test', async (req, res) => {
 
   const agent = new https.Agent({ rejectUnauthorized: verifyTls === true });
   const hint = loginHints.get(ipAddress);
-  const baseUrl = hint?.baseUrl || `http://${ipAddress}:1741/nbi/v1`;
-  const url = `${baseUrl}/configservice/getVersion`;
+  const baseUrl = (hint?.baseUrl) || (OVERRIDE_BASE ? OVERRIDE_BASE : `http://${ipAddress}:1741/nbi`);
+  const url = `${baseUrl.replace(/\/v1$/, '')}/configservice/getVersion`;
   
   // Cookie aus Session holen
   const session = sessions.get(ipAddress);

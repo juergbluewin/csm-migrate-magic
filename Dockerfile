@@ -13,6 +13,10 @@ RUN npm ci
 # Copy source code
 COPY . .
 
+# Build-time Vite vars
+ARG VITE_PROXY_URL
+ENV VITE_PROXY_URL=${VITE_PROXY_URL}
+
 # Build the application
 RUN npm run build
 

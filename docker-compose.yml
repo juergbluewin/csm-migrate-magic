@@ -2,7 +2,10 @@
 
 services:
   cisco-migration-tool:
-    build: .
+    build:
+      context: .
+      args:
+        VITE_PROXY_URL: ${VITE_PROXY_URL}
     ports:
       - "3000:3000"
     env_file:
