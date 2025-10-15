@@ -1,24 +1,44 @@
-
-
 services:
-  cisco-migration-tool:
+  proxy:
     build:
       context: .
-      args:
-        VITE_PROXY_URL: ${VITE_PROXY_URL}
+      dockerfile: proxy/Dockerfile
     ports:
       - "3000:3000"
     env_file:
       - .env
     environment:
-      - NODE_ENV=production
-      - CSM_BASEURL=http://10.240.74.156:1741/nbi
-      - CSM_VERIFY_TLS=false
-      - CORS_ALLOW_ORIGIN=http://localhost:8080
+      - PORT=3000
+      - VERIFY_TLS=${VERIFY_TLS:-false}
+      - CSM_BASEURL=${CSM_PROTOCOL:-http}://${CSM_IP}${CSM_BASE_PATH:-/nbi}
+      - CORS_ALLOW_ORIGIN=${CORS_ALLOW_ORIGIN:-*}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/healthz"]
       interval: 5s
       timeout: 3s
       retries: 10
-      start_period: 10s
+      start_period: 5s
     restart: unless-stopped
+    networks:
+      - csm-network
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_PROXY_URL: ${VITE_PROXY_URL:-http://localhost:3000/csm-proxy}
+    ports:
+      - "8080:8080"
+    depends_on:
+      proxy:
+        condition: service_healthy
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+    networks:
+      - csm-network
+
+networks:
+  csm-network:
+    driver: bridge
