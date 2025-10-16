@@ -5,8 +5,8 @@ WORKDIR /app
 # Copy package files
 COPY proxy/package*.json ./
 
-# Install dependencies
-RUN npm install --production
+# Install dependencies with longer timeout
+RUN npm install --production --fetch-timeout=300000 --fetch-retries=5
 
 # Copy proxy source
 COPY proxy/ ./

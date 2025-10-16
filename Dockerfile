@@ -22,11 +22,8 @@ ENV VITE_PROXY_URL=${VITE_PROXY_URL}
 # Build the application
 RUN npm run build
 
-# Install serve to run the built application
-RUN npm install -g serve
-
 # Expose port 8080
 EXPOSE 8080
 
-# Start static server
-CMD ["serve", "-s", "dist", "-l", "8080"]
+# Start static server using npx (no global install needed)
+CMD ["npx", "serve", "-s", "dist", "-l", "8080"]
