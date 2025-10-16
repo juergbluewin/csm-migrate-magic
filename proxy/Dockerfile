@@ -5,8 +5,9 @@ WORKDIR /app
 # Copy package files
 COPY proxy/package*.json ./
 
-# Install dependencies with longer timeout
-RUN npm install --production --fetch-timeout=300000 --fetch-retries=5
+# Install dependencies - try with alternative registry if needed
+RUN npm install --production --fetch-timeout=300000 --fetch-retries=5 || \
+    npm install --production --registry=https://registry.npmmirror.com --fetch-timeout=300000
 
 # Copy proxy source
 COPY proxy/ ./
