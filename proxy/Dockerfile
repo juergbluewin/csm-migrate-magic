@@ -2,18 +2,23 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Copy package files
-COPY proxy/package*.json ./
-
-# Install dependencies - try with alternative registry if needed
-RUN npm install --production --fetch-timeout=300000 --fetch-retries=5 || \
-    npm install --production --registry=https://registry.npmmirror.com --fetch-timeout=300000
-
-# Copy proxy source
+# Copy proxy source (includes node_modules if present)
 COPY proxy/ ./
 
-# Install ts-node for TypeScript execution
-RUN npm install -g ts-node typescript
+# Use preinstalled node_modules if available; otherwise install production deps with fallbacks
+RUN if [ -d "node_modules" ]; then \
+  echo "Using preinstalled node_modules"; \
+else \
+  npm config set fetch-timeout 300000 && \
+  npm config set fetch-retries 5 && \
+  npm config set strict-ssl false && \
+  (npm ci --omit=dev || npm install --omit=dev --registry=https://registry.npmmirror.com --fetch-timeout=300000); \
+fi && \
+  if [ -f "tsconfig.json" ] && [ -x "./node_modules/.bin/tsc" ]; then \
+    ./node_modules/.bin/tsc; \
+  else \
+    echo "Skipping TS compile (typescript missing)"; \
+  fi
 
 # Expose proxy port
 EXPOSE 3000
@@ -22,5 +27,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
   CMD wget -qO- http://localhost:3000/healthz || exit 1
 
-# Start proxy
-CMD ["ts-node", "server.ts"]
+# Start proxy: prefer compiled JS; fallback to ts-node if needed
+CMD ["/bin/sh", "-c", "if [ -f dist/server.js ]; then node dist/server.js; else npx ts-node server.ts; fi"]
