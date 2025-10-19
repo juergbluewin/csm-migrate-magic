@@ -75,11 +75,19 @@ export const DataPanel = ({
   };
 
   const loadDataFromCSM = async () => {
-    if (!csmConnection.username || !csmConnection.password) {
+    if (!csmConnection.ipAddress || !csmConnection.username || !csmConnection.password) {
       addLog('error', 'CSM Anmeldung erforderlich', 'Bitte zuerst CSM-Zugangsdaten eingeben und Verbindung testen');
       return;
     }
 
+    // Check if anything is selected for export
+    if (!exportSelection.networkObjects && !exportSelection.serviceObjects && !exportSelection.accessLists) {
+      addLog('warning', 'Keine Objekte ausgewählt', 'Bitte gehen Sie zum "Auswahl" Tab und wählen Sie aus, welche Objekte exportiert werden sollen (Network Objects, Service Objects, Access Lists)');
+      return;
+    }
+
+    console.log('🔄 Starte Datenexport von CSM:', csmConnection.ipAddress);
+    console.log('📋 Export Auswahl:', exportSelection);
     addLog('info', 'Datenexport gestartet', `Lade Objekte vom CSM ${csmConnection.ipAddress} ...`);
     setIsLoading(true);
     
@@ -88,6 +96,7 @@ export const DataPanel = ({
       const client = new CSMClient();
       
       // Login to CSM
+      console.log('📡 CSM Login wird durchgeführt...');
       addLog('info', 'CSM Login', 'Anmeldung am CSM...');
       const loginSuccess = await client.login({
         ipAddress: csmConnection.ipAddress,
@@ -96,6 +105,7 @@ export const DataPanel = ({
         verifyTls: csmConnection.verifyTls
       });
 
+      console.log('✅ Login Ergebnis:', loginSuccess);
       if (!loginSuccess) {
         addLog('error', 'CSM Login fehlgeschlagen', 'Überprüfen Sie Benutzername und Passwort');
         setIsLoading(false);
@@ -108,18 +118,22 @@ export const DataPanel = ({
 
       // Load Network Objects
       if (exportSelection.networkObjects) {
+        console.log('📦 Lade Network Objects...');
         addLog('info', 'Network Objects', 'Lade Network Objects...');
         let offset = 0;
         let hasMore = true;
         
         while (hasMore) {
+          console.log(`  → Lade Network Objects batch (offset: ${offset})`);
           const xmlData = await client.getPolicyObjectsList({
             policyObjectType: 'NetworkPolicyObject',
             limit: 100,
             offset
           });
           
+          console.log(`  → Erhalte XML (Länge: ${xmlData?.length || 0})`);
           const objects = CSMXMLParser.parseNetworkObjects(xmlData);
+          console.log(`  → Geparst: ${objects.length} Objekte`);
           allNetworkObjects.push(...objects);
           
           // Simple pagination check - if we got less than limit, we're done
@@ -127,29 +141,35 @@ export const DataPanel = ({
           offset += 100;
         }
         
+        console.log(`✅ Network Objects fertig: ${allNetworkObjects.length} Objekte`);
         addLog('success', 'Network Objects', `${allNetworkObjects.length} Network Objects geladen`);
       }
 
       // Load Service Objects
       if (exportSelection.serviceObjects) {
+        console.log('📦 Lade Service Objects...');
         addLog('info', 'Service Objects', 'Lade Service Objects...');
         let offset = 0;
         let hasMore = true;
         
         while (hasMore) {
+          console.log(`  → Lade Service Objects batch (offset: ${offset})`);
           const xmlData = await client.getPolicyObjectsList({
             policyObjectType: 'ServicePolicyObject',
             limit: 100,
             offset
           });
           
+          console.log(`  → Erhalte XML (Länge: ${xmlData?.length || 0})`);
           const objects = CSMXMLParser.parseServiceObjects(xmlData);
+          console.log(`  → Geparst: ${objects.length} Objekte`);
           allServiceObjects.push(...objects);
           
           hasMore = objects.length === 100;
           offset += 100;
         }
         
+        console.log(`✅ Service Objects fertig: ${allServiceObjects.length} Objekte`);
         addLog('success', 'Service Objects', `${allServiceObjects.length} Service Objects geladen`);
       }
 
@@ -244,10 +264,14 @@ export const DataPanel = ({
       // Logout from CSM
       client.logout();
       
+      console.log(`✅ Datenexport erfolgreich: ${nObjs.length} Network Objects, ${sObjs.length} Service Objects, ${allAccessRules.length} ACL Rules`);
       addLog('success', 'Datenexport abgeschlossen', 
         `${nObjs.length} Network Objects, ${sObjs.length} Service Objects${allAccessRules.length ? `, ${allAccessRules.length} ACL Rules` : ''} importiert`);
     } catch (e: any) {
-      addLog('error', 'Export fehlgeschlagen', e?.message || 'Unbekannter Fehler');
+      console.error('❌ Datenexport Fehler:', e);
+      const errorMessage = e?.message || 'Unbekannter Fehler';
+      const errorStack = e?.stack || '';
+      addLog('error', 'Export fehlgeschlagen', `${errorMessage}\n\nDetails: ${errorStack.substring(0, 200)}`);
     } finally {
       setIsLoading(false);
     }
