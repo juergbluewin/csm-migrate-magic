@@ -79,12 +79,13 @@ function withSingleLogin(ip: string, fn: () => Promise<any>) {
 // Build login XML
 function buildLoginXml(reqId: string, username: string, password: string): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
-<loginRequest xmlns="csm">
-  <protVersion>2.0</protVersion>
+<csm:loginRequest xmlns:csm="csm">
+  <protVersion>1.0</protVersion>
   <reqId>${reqId}</reqId>
   <username>${username}</username>
   <password>${password}</password>
-</loginRequest>`;
+  <heartbeatRequested>false</heartbeatRequested>
+</csm:loginRequest>`;
 }
 
 // Cleanup session
@@ -94,10 +95,10 @@ async function cleanupSession(sessionId: string, agent: https.Agent) {
 
   try {
     const logoutXml = `<?xml version="1.0" encoding="UTF-8"?>
-<logoutRequest xmlns="csm">
-  <protVersion>2.0</protVersion>
+<csm:logoutRequest xmlns:csm="csm">
+  <protVersion>1.0</protVersion>
   <reqId>${randomBytes(4).toString('hex')}</reqId>
-</logoutRequest>`;
+</csm:logoutRequest>`;
 
     await axios.post(`${session.baseUrl}/logout`, logoutXml, {
       headers: {
