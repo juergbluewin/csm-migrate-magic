@@ -107,7 +107,26 @@ export const DataPanel = ({
 
       console.log('✅ Login Ergebnis:', loginSuccess);
       if (!loginSuccess) {
-        addLog('error', 'CSM Login fehlgeschlagen', 'Überprüfen Sie Benutzername und Passwort');
+        addLog('error', '❌ CSM Login fehlgeschlagen (HTTP 401)', 
+          `Authentifizierung abgelehnt für Benutzer: ${csmConnection.username}\n\n` +
+          `🔍 Lösungsvorschläge:\n\n` +
+          `1️⃣ ZUGANGSDATEN PRÜFEN\n` +
+          `   • Benutzername und Passwort korrekt?\n` +
+          `   • Domain-Format benötigt? Versuchen Sie: "DOMAIN\\${csmConnection.username}"\n` +
+          `   • Bei "@" im Benutzernamen: "user@domain.com" Format testen\n\n` +
+          `2️⃣ CSM API LIZENZ (KRITISCH)\n` +
+          `   • CSM: Tools → Security Manager Administration → Licensing\n` +
+          `   • API Lizenz MUSS aktiviert sein (Professional Edition)\n` +
+          `   • Error Code 26: "API license is not enabled" → Lizenz fehlt\n\n` +
+          `3️⃣ API SERVICE\n` +
+          `   • Administration Settings → "Enable API Service" aktiviert?\n` +
+          `   • Max. aktive Sessions erreicht? (Standard: 5, Max: 10)\n` +
+          `   • NBI Service Status: $CSM_HOME/bin/pdtool nbi status\n\n` +
+          `4️⃣ BENUTZER-BERECHTIGUNGEN\n` +
+          `   • Hat der Benutzer API-Zugriff in CSM?\n` +
+          `   • Workflow/Ticketing Mode konfiguriert?\n\n` +
+          `📖 Details: Cisco CSM API Spec v2.4, Seite 36-40 (Login Method)\n` +
+          `🔗 Login Endpoint: https://${csmConnection.ipAddress}/nbi/login`);
         setIsLoading(false);
         return;
       }
