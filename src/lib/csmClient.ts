@@ -163,6 +163,7 @@ export class CSMClient {
     if (result.ok !== true || !response.ok) {
       const statusCode = result.status ?? response.status;
       const statusText = result.statusText ?? response.statusText ?? 'Unknown error';
+      const responseBody = result.body || '';
       
       if (statusCode === 423) {
         // Session-Lock (Code 29): Session lokal löschen
@@ -180,7 +181,30 @@ export class CSMClient {
         throw new Error(`CSM NBI Service nicht verfügbar auf ${ipAddress}`);
       }
       
-      throw new Error(`CSM Request fehlgeschlagen: ${statusCode} ${statusText}`);
+      // Parse error details from CSM XML response
+      let errorDetails = statusText;
+      if (responseBody && typeof responseBody === 'string') {
+        // Try to extract error message from XML
+        const codeMatch = responseBody.match(/<code>(\d+)<\/code>/i);
+        const messageMatch = responseBody.match(/<message>([^<]+)<\/message>/i);
+        const errorCode = codeMatch?.[1] || 'unknown';
+        const errorMessage = messageMatch?.[1] || statusText;
+        
+        if (codeMatch || messageMatch) {
+          errorDetails = `Error Code ${errorCode}: ${errorMessage}`;
+        }
+        
+        // Log full response for debugging
+        console.error('📛 CSM Error Response:', {
+          endpoint,
+          status: statusCode,
+          errorCode,
+          errorMessage,
+          fullBody: responseBody.substring(0, 500)
+        });
+      }
+      
+      throw new Error(`CSM Request fehlgeschlagen: HTTP ${statusCode}\n\n${errorDetails}\n\nEndpoint: ${endpoint}`);
     }
     
     return String(result.body || '');

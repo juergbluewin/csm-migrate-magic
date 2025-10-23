@@ -302,10 +302,24 @@ app.post('/csm-proxy', async (req, res) => {
         }
 
         if (r.status >= 400) {
+          // Parse error details from CSM response
+          const codeMatch = text.match(/<code>(\d+)<\/code>/i);
+          const messageMatch = text.match(/<message>([^<]+)<\/message>/i);
+          
+          let errorMsg = `Request failed: HTTP ${r.status}`;
+          if (codeMatch || messageMatch) {
+            const errorCode = codeMatch?.[1] || 'unknown';
+            const errorMessage = messageMatch?.[1] || 'Unknown error';
+            errorMsg = `CSM Error ${errorCode}: ${errorMessage}`;
+            console.error(`[${requestId}] CSM API Error at ${endpoint}: Code ${errorCode}, Message: ${errorMessage}`);
+          } else {
+            console.error(`[${requestId}] HTTP ${r.status} at ${endpoint}: ${text.substring(0, 200)}`);
+          }
+          
           return res.status(r.status).json({
             ok: false,
             status: r.status,
-            statusText: `Request failed: HTTP ${r.status}`,
+            statusText: errorMsg,
             body: text,
           });
         }
