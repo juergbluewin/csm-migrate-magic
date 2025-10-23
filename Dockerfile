@@ -7,13 +7,15 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci
+# Install ALL dependencies (including dev dependencies needed for Vite build)
+RUN npm ci --prefer-offline --no-audit
 
-# Copy source code (exclude proxy folder)
+# Copy source code and config files
 COPY src/ ./src/
 COPY public/ ./public/
-COPY index.html tsconfig*.json vite.config.ts tailwind.config.ts postcss.config.js ./
+COPY index.html ./
+COPY tsconfig*.json ./
+COPY vite.config.ts tailwind.config.ts postcss.config.js ./
 
 # Build-time Vite vars
 ARG VITE_PROXY_URL
