@@ -122,14 +122,16 @@ export class CSMClient {
   async getPolicyObjectsList({ policyObjectType, limit = 100, offset = 0 }: CSMObjectQuery) {
     if (!this.session) throw new Error('Nicht mit CSM verbunden');
 
+    // API Spec v2.4, Table 108: getPolicyObjectsListByType Request Format
     const requestXml = `<?xml version="1.0" encoding="UTF-8"?>
-      <getPolicyObjectsListByTypeRequest>
-        <policyObjectType>${policyObjectType}</policyObjectType>
-        <limit>${limit}</limit>
-        <offset>${offset}</offset>
-      </getPolicyObjectsListByTypeRequest>`;
+<getPolicyObjectsListByTypeRequest xmlns="csm">
+  <protVersion>1.0</protVersion>
+  <policyObjectType>${policyObjectType}</policyObjectType>
+  <limit>${limit}</limit>
+  <offset>${offset}</offset>
+</getPolicyObjectsListByTypeRequest>`;
 
-    return this.request('/v1/configservice/getPolicyObjectsListByType', requestXml);
+    return this.request('/configservice/getPolicyObjectsListByType', requestXml);
   }
 
   private async request(endpoint: string, body: string) {
@@ -211,46 +213,54 @@ export class CSMClient {
   }
 
   async getPolicyObject(objectName: string, objectType: 'NetworkPolicyObject' | 'ServicePolicyObject') {
+    // API Spec v2.4: getPolicyObject Request Format
     const wrapperTag = objectType === 'NetworkPolicyObject' ? 'networkPolicyObject' : 'servicePolicyObject';
     const requestXml = `<?xml version="1.0" encoding="UTF-8"?>
-      <getPolicyObjectRequest>
-        <${wrapperTag}>
-          <name>${objectName}</name>
-        </${wrapperTag}>
-      </getPolicyObjectRequest>`;
+<getPolicyObjectRequest xmlns="csm">
+  <protVersion>1.0</protVersion>
+  <${wrapperTag}>
+    <name>${objectName}</name>
+  </${wrapperTag}>
+</getPolicyObjectRequest>`;
 
-    return this.request('/v1/configservice/getPolicyObject', requestXml);
+    return this.request('/configservice/getPolicyObject', requestXml);
   }
 
   async getPolicyConfigByName(policyName: string, policyType: string = 'DeviceAccessRuleFirewallPolicy') {
+    // API Spec v2.4, Table 68: getPolicyConfigByName Request Format
     const requestXml = `<?xml version="1.0" encoding="UTF-8"?>
-      <getPolicyConfigByNameRequest>
-        <policyName>${policyName}</policyName>
-        <policyType>${policyType}</policyType>
-      </getPolicyConfigByNameRequest>`;
+<getPolicyConfigByNameRequest xmlns="csm">
+  <protVersion>1.0</protVersion>
+  <policyName>${policyName}</policyName>
+  <policyType>${policyType}</policyType>
+</getPolicyConfigByNameRequest>`;
 
-    return this.request('/v1/configservice/getPolicyConfigByName', requestXml);
+    return this.request('/configservice/getPolicyConfigByName', requestXml);
   }
 
   async getPolicyConfigByDeviceGID(deviceGID: string, policyType: string = 'DeviceAccessRuleFirewallPolicy') {
+    // API Spec v2.4, Table 71: getPolicyConfigByDeviceGID Request Format  
     const requestXml = `<?xml version="1.0" encoding="UTF-8"?>
-      <getPolicyConfigByDeviceGIDRequest>
-        <deviceGID>${deviceGID}</deviceGID>
-        <policyType>${policyType}</policyType>
-      </getPolicyConfigByDeviceGIDRequest>`;
+<getPolicyConfigByDeviceGIDRequest xmlns="csm">
+  <protVersion>1.0</protVersion>
+  <deviceGID>${deviceGID}</deviceGID>
+  <policyType>${policyType}</policyType>
+</getPolicyConfigByDeviceGIDRequest>`;
 
-    return this.request('/v1/configservice/getPolicyConfigByDeviceGID', requestXml);
+    return this.request('/configservice/getPolicyConfigByDeviceGID', requestXml);
   }
 
   async execDeviceReadOnlyCLICmds({ deviceIP, command, argument }: CSMCLIQuery) {
+    // API Spec v2.4, Table 115: execDeviceReadOnlyCLICmds Request Format
     const requestXml = `<?xml version="1.0" encoding="UTF-8"?>
-      <execDeviceReadOnlyCLICmdsRequest>
-        <deviceIP>${deviceIP}</deviceIP>
-        <cmd>${command}</cmd>
-        ${argument ? `<argument>${argument}</argument>` : ''}
-      </execDeviceReadOnlyCLICmdsRequest>`;
+<execDeviceReadOnlyCLICmdsRequest xmlns="csm">
+  <protVersion>1.0</protVersion>
+  <deviceIP>${deviceIP}</deviceIP>
+  <cmd>${command}</cmd>
+  ${argument ? `<argument>${argument}</argument>` : ''}
+</execDeviceReadOnlyCLICmdsRequest>`;
 
-    return this.request('/v1/utilservice/execDeviceReadOnlyCLICmds', requestXml);
+    return this.request('/utilservice/execDeviceReadOnlyCLICmds', requestXml);
   }
 
   async logout() {
