@@ -259,11 +259,13 @@ app.post('/csm-proxy', async (req, res) => {
       // REQUEST
       if (action === 'request' && endpoint) {
         if (!sessionId) {
+          console.warn(`[${requestId}] No session ID provided`);
           return res.status(401).json({ ok: false, status: 401, statusText: 'No session' });
         }
 
         const session = sessions.get(sessionId);
         if (!session) {
+          console.warn(`[${requestId}] Session not found: ${sessionId}`);
           return res.status(401).json({ ok: false, status: 401, statusText: 'Session not found' });
         }
 
@@ -274,10 +276,23 @@ app.post('/csm-proxy', async (req, res) => {
         const endpointPath = endpoint.startsWith('/nbi/') ? endpoint.replace(/^\/nbi/, '') : endpoint;
         const url = `${session.baseUrl}${endpointPath.startsWith('/') ? '' : '/'}${endpointPath}`;
 
-        const r = await axios.post(url, body, {
-          httpAgent: new http.Agent(),
-          httpsAgent: agent,
-          headers: {
+        console.log(`[${requestId}] Forwarding request:`, {
+          endpoint,
+          endpointPath,
+          url,
+          sessionId,
+          baseUrl: session.baseUrl,
+          bodyLength: body?.length || 0
+        });
+
+        let r;
+        let text = '';
+        
+        try {
+          r = await axios.post(url, body, {
+            httpAgent: new http.Agent(),
+            httpsAgent: agent,
+            headers: {
             'Content-Type': 'application/xml',
             'Accept': 'application/xml',
             'Cookie': session.cookie,
@@ -287,7 +302,27 @@ app.post('/csm-proxy', async (req, res) => {
           timeout: 30000,
         });
 
-        const text = String(r.data || '');
+          text = String(r.data || '');
+        } catch (requestError) {
+          const err = requestError as any;
+          console.error(`[${requestId}] Network error calling CSM:`, {
+            code: err.code,
+            message: err.message,
+            errno: err.errno,
+            syscall: err.syscall,
+            address: err.address,
+            port: err.port,
+            url
+          });
+
+          // Return 503 for network connectivity issues
+          return res.status(503).json({
+            ok: false,
+            status: 503,
+            statusText: `CSM Server nicht erreichbar: ${err.code || err.message}`,
+            body: '',
+          });
+        }
 
         // Code 29: session conflict
         if (/<\s*code>\s*29\s*<\/code>/i.test(text)) {
@@ -301,24 +336,26 @@ app.post('/csm-proxy', async (req, res) => {
           });
         }
 
-        if (r.status >= 400) {
+        console.log(`[${requestId}] CSM responded: HTTP ${r!.status}, body length ${text.length}`);
+
+        if (r!.status >= 400) {
           // Parse error details from CSM response
           const codeMatch = text.match(/<code>(\d+)<\/code>/i);
           const messageMatch = text.match(/<message>([^<]+)<\/message>/i);
           
-          let errorMsg = `Request failed: HTTP ${r.status}`;
+          let errorMsg = `Request failed: HTTP ${r!.status}`;
           if (codeMatch || messageMatch) {
             const errorCode = codeMatch?.[1] || 'unknown';
             const errorMessage = messageMatch?.[1] || 'Unknown error';
             errorMsg = `CSM Error ${errorCode}: ${errorMessage}`;
             console.error(`[${requestId}] CSM API Error at ${endpoint}: Code ${errorCode}, Message: ${errorMessage}`);
           } else {
-            console.error(`[${requestId}] HTTP ${r.status} at ${endpoint}: ${text.substring(0, 200)}`);
+            console.error(`[${requestId}] HTTP ${r!.status} at ${endpoint}: ${text.substring(0, 200)}`);
           }
           
-          return res.status(r.status).json({
+          return res.status(r!.status).json({
             ok: false,
-            status: r.status,
+            status: r!.status,
             statusText: errorMsg,
             body: text,
           });
