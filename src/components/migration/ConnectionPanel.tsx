@@ -52,13 +52,11 @@ export const ConnectionPanel = ({
 
       if (success) {
         onStatusChange({ ...connectionStatus, csm: 'connected' });
-        addLog('success', 'CSM Verbindung erfolgreich', `Verbunden mit https://${csmConnection.ipAddress}/nbi - Verbindung bleibt aktiv für Datenexport`);
+        addLog('success', 'CSM Verbindung erfolgreich', `Verbunden mit https://${csmConnection.ipAddress}/nbi - Session bleibt aktiv für Datenexport (10 Min Timeout)`);
         
-        // Logout nach kurzem Timeout, um Session nicht unnötig offen zu lassen
-        setTimeout(async () => {
-          await client.logout();
-          console.log('CSM Session nach Test geschlossen');
-        }, 2000);
+        // Session bleibt aktiv für spätere Datenexporte
+        // CSM Session Timeout: 10 Minuten (wird automatisch vom CSM verwaltet)
+        console.log('✅ CSM Session aktiv, bereit für Datenexport');
       } else {
         onStatusChange({ ...connectionStatus, csm: 'error' });
         addLog('error', 'CSM Verbindung fehlgeschlagen', 'Login fehlgeschlagen - Benutzername oder Passwort falsch');

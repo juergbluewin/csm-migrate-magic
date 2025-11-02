@@ -411,8 +411,8 @@ export class CSMExportService {
       logs.push(this.log('info', 'CSM Export completed successfully', 
         `Duration: ${result.duration}ms, Objects: ${totalNetworkObjects + totalServiceObjects + totalAccessRules}`));
       
-      // Cleanup
-      this.client.logout();
+      // Keep session active for potential subsequent exports
+      // Session will timeout automatically after 10 minutes of inactivity
       
       return result;
       
