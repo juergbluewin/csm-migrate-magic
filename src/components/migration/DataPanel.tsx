@@ -51,6 +51,7 @@ export const DataPanel = ({
   const [isExporting, setIsExporting] = useState(false);
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
   const [isExportConfigOpen, setIsExportConfigOpen] = useState(false);
+  const [csmClient, setCsmClient] = useState<any>(null);
 
   const handleAdvancedExport = async (config: ExportConfig) => {
     setIsExporting(true);
@@ -93,12 +94,23 @@ export const DataPanel = ({
     
     try {
       const { CSMClient, CSMXMLParser } = await import('@/lib/csmClient');
-      const client = new CSMClient();
       
-      // Login to CSM
-      console.log('📡 CSM Login wird durchgeführt...');
+      // Reuse existing client or create new one
+      let client = csmClient;
+      let loginSuccess = false;
+      
+      if (!client) {
+        console.log('🆕 Erstelle neue CSM Client Instanz');
+        client = new CSMClient();
+        setCsmClient(client);
+      } else {
+        console.log('♻️ Verwende existierende CSM Client Instanz');
+      }
+      
+      // Always try login - proxy will reuse session if valid
+      console.log('📡 CSM Login/Session-Check...');
       addLog('info', 'CSM Login', 'Anmeldung am CSM...');
-      const loginSuccess = await client.login({
+      loginSuccess = await client.login({
         ipAddress: csmConnection.ipAddress,
         username: csmConnection.username,
         password: csmConnection.password,
@@ -280,9 +292,7 @@ export const DataPanel = ({
         onAccessListsChange([]);
       }
 
-      // Logout from CSM
-      client.logout();
-      
+      // Keep session alive - don't logout after each export
       console.log(`✅ Datenexport erfolgreich: ${nObjs.length} Network Objects, ${sObjs.length} Service Objects, ${allAccessRules.length} ACL Rules`);
       addLog('success', 'Datenexport abgeschlossen', 
         `${nObjs.length} Network Objects, ${sObjs.length} Service Objects${allAccessRules.length ? `, ${allAccessRules.length} ACL Rules` : ''} importiert`);
@@ -290,6 +300,13 @@ export const DataPanel = ({
       console.error('❌ Datenexport Fehler:', e);
       const errorMessage = e?.message || 'Unbekannter Fehler';
       const errorStack = e?.stack || '';
+      
+      // If session error, clear client so new login is attempted
+      if (errorMessage.includes('Session') || errorMessage.includes('401') || errorMessage.includes('423')) {
+        console.log('🔄 Session-Fehler erkannt, Client wird zurückgesetzt');
+        setCsmClient(null);
+      }
+      
       addLog('error', 'Export fehlgeschlagen', `${errorMessage}\n\nDetails: ${errorStack.substring(0, 200)}`);
     } finally {
       setIsLoading(false);

@@ -88,6 +88,26 @@ function buildLoginXml(reqId: string, username: string, password: string): strin
 </csm:loginRequest>`;
 }
 
+// Find existing valid session for IP
+function findValidSession(ipAddress: string): { sessionId: string; session: any } | null {
+  const SESSION_TIMEOUT = 10 * 60 * 1000; // 10 minutes (conservative)
+  const now = Date.now();
+  
+  for (const [sessionId, session] of sessions.entries()) {
+    if (session.ipAddress === ipAddress) {
+      const age = now - session.lastUsed;
+      if (age < SESSION_TIMEOUT) {
+        console.log(`♻️ Found valid session for ${ipAddress} (age: ${Math.round(age/1000)}s, sessionId: ${sessionId})`);
+        return { sessionId, session };
+      } else {
+        console.log(`⏰ Session expired for ${ipAddress} (age: ${Math.round(age/1000)}s, sessionId: ${sessionId})`);
+        sessions.delete(sessionId);
+      }
+    }
+  }
+  return null;
+}
+
 // Cleanup session
 async function cleanupSession(sessionId: string, agent: https.Agent) {
   const session = sessions.get(sessionId);
@@ -142,6 +162,22 @@ app.post('/csm-proxy', async (req, res) => {
 
       // LOGIN
       if (action === 'login') {
+        // Check for existing valid session first
+        const existing = findValidSession(ipAddress);
+        if (existing) {
+          console.log(`[${requestId}] ♻️ Reusing existing session for ${ipAddress}`);
+          existing.session.lastUsed = Date.now();
+          sessions.set(existing.sessionId, existing.session);
+          return res.status(200).json({
+            ok: true,
+            status: 200,
+            statusText: 'Session reused',
+            sessionId: existing.sessionId,
+            body: '',
+          });
+        }
+        
+        // No valid session - perform login
         return withSingleLogin(ipAddress, async () => {
           const expandOverride = (base: string) => {
             const b = base.replace(/\/+$/, '');
