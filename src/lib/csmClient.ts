@@ -131,7 +131,7 @@ export class CSMClient {
   <offset>${offset}</offset>
 </getPolicyObjectsListByTypeRequest>`;
 
-    return this.request('/configservice/ConfigService', requestXml);
+    return this.request('/configservice', requestXml);
   }
 
   private async request(endpoint: string, body: string) {
@@ -223,7 +223,7 @@ export class CSMClient {
   </${wrapperTag}>
 </getPolicyObjectRequest>`;
 
-    return this.request('/configservice/ConfigService', requestXml);
+    return this.request('/configservice', requestXml);
   }
 
   async getPolicyConfigByName(policyName: string, policyType: string = 'DeviceAccessRuleFirewallPolicy') {
@@ -235,7 +235,7 @@ export class CSMClient {
   <policyType>${policyType}</policyType>
 </getPolicyConfigByNameRequest>`;
 
-    return this.request('/configservice/ConfigService', requestXml);
+    return this.request('/configservice', requestXml);
   }
 
   async getPolicyConfigByDeviceGID(deviceGID: string, policyType: string = 'DeviceAccessRuleFirewallPolicy') {
@@ -247,7 +247,7 @@ export class CSMClient {
   <policyType>${policyType}</policyType>
 </getPolicyConfigByDeviceGIDRequest>`;
 
-    return this.request('/configservice/ConfigService', requestXml);
+    return this.request('/configservice', requestXml);
   }
 
   async execDeviceReadOnlyCLICmds({ deviceIP, command, argument }: CSMCLIQuery) {
@@ -260,7 +260,7 @@ export class CSMClient {
   ${argument ? `<argument>${argument}</argument>` : ''}
 </execDeviceReadOnlyCLICmdsRequest>`;
 
-    return this.request('/utilservice/UtilService', requestXml);
+    return this.request('/utilservice', requestXml);
   }
 
   async logout() {
