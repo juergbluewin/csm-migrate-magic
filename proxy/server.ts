@@ -255,10 +255,16 @@ app.post('/csm-proxy', async (req, res) => {
                 const timeoutMatch = bodyText.match(/<sessionTimeoutInMins>(\d+)<\/sessionTimeoutInMins>/i);
                 const mins = timeoutMatch ? parseInt(timeoutMatch[1], 10) : 30;
 
+                // CSM NBI API: Login unter /nbi/login, aber Fach-APIs unter /nbi/v1/...
+                let apiBaseUrl = currentBase;
+                if (!apiBaseUrl.includes('/v1')) {
+                  apiBaseUrl = apiBaseUrl + '/v1';
+                }
+
                 sessions.set(newSessionId, {
                   ipAddress,
                   cookie: mergedCookie,
-                  baseUrl: currentBase,
+                  baseUrl: apiBaseUrl,
                   lastUsed: Date.now(),
                 });
 
