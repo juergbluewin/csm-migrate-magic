@@ -255,11 +255,8 @@ app.post('/csm-proxy', async (req, res) => {
                 const timeoutMatch = bodyText.match(/<sessionTimeoutInMins>(\d+)<\/sessionTimeoutInMins>/i);
                 const mins = timeoutMatch ? parseInt(timeoutMatch[1], 10) : 30;
 
-                // CSM NBI API: Login unter /nbi/login, aber Fach-APIs unter /nbi/v1/...
-                let apiBaseUrl = currentBase;
-                if (!apiBaseUrl.includes('/v1')) {
-                  apiBaseUrl = apiBaseUrl + '/v1';
-                }
+                // Verwende exakt die Basis-URL des erfolgreichen Logins; NICHT automatisch /v1 erzwingen
+                const apiBaseUrl = currentBase;
 
                 sessions.set(newSessionId, {
                   ipAddress,
@@ -381,10 +378,74 @@ app.post('/csm-proxy', async (req, res) => {
         console.log(`[${requestId}] CSM responded: HTTP ${r!.status}, body length ${text.length}`);
 
         if (r!.status >= 400) {
-          // Parse error details from CSM response
+          // Optionaler Fallback zwischen /nbi und /nbi/v1 bei Fehlern
+          const isUnknownErr = /<code>\s*1\s*<\/code>/i.test(text) && /<message>\s*Unknown error\s*<\/message>/i.test(text);
+          const shouldTryFallback = r!.status === 404 || r!.status === 401 || r!.status === 500 || isUnknownErr;
+
+          if (shouldTryFallback) {
+            const base = session.baseUrl.replace(/\/+$/, '');
+            const altBase = /\/v1$/.test(base) ? base.replace(/\/v1$/, '') : `${base}/v1`;
+            const altUrl = `${altBase}${endpointPath.startsWith('/') ? '' : '/'}${endpointPath}`;
+            console.warn(`[${requestId}] HTTP ${r!.status} at ${url}. Retrying via ${altUrl}`);
+
+            try {
+              const r2 = await axios.post(altUrl, body, {
+                httpAgent: new http.Agent(),
+                httpsAgent: agent,
+                headers: {
+                  'Content-Type': 'application/xml',
+                  'Accept': 'application/xml',
+                  'Cookie': session.cookie,
+                },
+                validateStatus: () => true,
+                responseType: 'text',
+                timeout: 30000,
+              });
+
+              const text2 = String(r2.data || '');
+              console.log(`[${requestId}] Fallback responded: HTTP ${r2.status}, body length ${text2.length}`);
+
+              // Code 29 während Fallback
+              if (/<\s*code>\s*29\s*<\/code>/i.test(text2)) {
+                console.warn(`[${requestId}] Code 29 during fallback to ${endpoint}`);
+                await cleanupSession(sessionId, agent);
+                return res.status(423).json({
+                  ok: false,
+                  status: 423,
+                  statusText: 'CSM session locked (Code 29) - please login again',
+                  body: text2,
+                });
+              }
+
+              if (r2.status < 400) {
+                // Persistiere alternative Basis
+                session.baseUrl = altBase;
+                sessions.set(sessionId, session);
+                return res.status(200).json({ ok: true, status: 200, statusText: 'OK', body: text2 });
+              } else {
+                const codeMatch2 = text2.match(/<code>(\d+)<\/code>/i);
+                const messageMatch2 = text2.match(/<message>([^<]+)<\/message>/i);
+                let errorMsg2 = `Request failed: HTTP ${r2.status}`;
+                if (codeMatch2 || messageMatch2) {
+                  const errorCode2 = codeMatch2?.[1] || 'unknown';
+                  const errorMessage2 = messageMatch2?.[1] || 'Unknown error';
+                  errorMsg2 = `CSM Error ${errorCode2}: ${errorMessage2}`;
+                  console.error(`[${requestId}] Fallback API Error at ${endpoint}: Code ${errorCode2}, Message: ${errorMessage2}`);
+                } else {
+                  console.error(`[${requestId}] HTTP ${r2.status} at fallback ${altUrl}: ${text2.substring(0, 200)}`);
+                }
+                return res.status(r2.status).json({ ok: false, status: r2.status, statusText: errorMsg2, body: text2 });
+              }
+            } catch (e2) {
+              const err2: any = e2;
+              console.error(`[${requestId}] Fallback network error:`, err2?.code || err2?.message || e2);
+              // Fällt zurück auf ursprünglichen Fehler unten
+            }
+          }
+
+          // Kein (erfolgreicher) Fallback: ursprünglichen Fehler zurückgeben
           const codeMatch = text.match(/<code>(\d+)<\/code>/i);
           const messageMatch = text.match(/<message>([^<]+)<\/message>/i);
-          
           let errorMsg = `Request failed: HTTP ${r!.status}`;
           if (codeMatch || messageMatch) {
             const errorCode = codeMatch?.[1] || 'unknown';
@@ -394,13 +455,7 @@ app.post('/csm-proxy', async (req, res) => {
           } else {
             console.error(`[${requestId}] HTTP ${r!.status} at ${endpoint}: ${text.substring(0, 200)}`);
           }
-          
-          return res.status(r!.status).json({
-            ok: false,
-            status: r!.status,
-            statusText: errorMsg,
-            body: text,
-          });
+          return res.status(r!.status).json({ ok: false, status: r!.status, statusText: errorMsg, body: text });
         }
 
         return res.status(200).json({ ok: true, status: 200, statusText: 'OK', body: text });
