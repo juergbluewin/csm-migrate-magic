@@ -402,8 +402,7 @@ export const ConnectionPanel = ({
             action: 'request',
             ipAddress: ip,
             endpoint: '/configservice',
-            body: testXml,
-            sessionId: 'test-session'
+            body: testXml
           })
         });
 
@@ -433,8 +432,7 @@ export const ConnectionPanel = ({
             action: 'request',
             ipAddress: ip,
             endpoint: '/v1/configservice',
-            body: testXml,
-            sessionId: 'test-session'
+            body: testXml
           })
         });
 
