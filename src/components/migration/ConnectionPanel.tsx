@@ -370,6 +370,103 @@ export const ConnectionPanel = ({
     }
   };
 
+  const testCSMApiEndpoints = async () => {
+    if (connectionStatus.csm !== 'connected') {
+      addLog('error', 'API-Endpoint Test', 'Bitte stellen Sie zuerst eine Verbindung zum CSM her');
+      return;
+    }
+
+    addLog('info', '🧪 API-Endpoint Test gestartet', 'Teste verschiedene CSM NBI API-Pfade...');
+
+    try {
+      const { resolveCsmProxyBase } = await import('@/lib/proxyResolver');
+      const proxyUrl = resolveCsmProxyBase();
+      const ip = csmConnection.ipAddress;
+
+      // Test XML Request für getPolicyObjectsListByType
+      const testXml = `<?xml version="1.0" encoding="UTF-8"?>
+<getPolicyObjectsListByTypeRequest xmlns="csm">
+  <protVersion>1.0</protVersion>
+  <policyObjectType>NetworkPolicyObject</policyObjectType>
+  <limit>1</limit>
+  <offset>0</offset>
+</getPolicyObjectsListByTypeRequest>`;
+
+      // Test 1: /nbi/configservice (ohne v1)
+      addLog('info', '📍 Test 1/2: /nbi/configservice', 'Teste API-Pfad ohne /v1...');
+      try {
+        const response1 = await fetch(proxyUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'request',
+            ipAddress: ip,
+            endpoint: '/configservice',
+            body: testXml,
+            sessionId: 'test-session'
+          })
+        });
+
+        const result1 = await response1.json();
+        
+        if (result1.ok && result1.status === 200) {
+          addLog('success', '✅ /nbi/configservice funktioniert', 
+            'Der API-Pfad OHNE /v1 ist korrekt!\n' +
+            'Die Session verwendet jetzt: /nbi/configservice');
+        } else {
+          addLog('warning', `⚠️ /nbi/configservice: HTTP ${result1.status}`, 
+            `Status: ${result1.statusText || 'Unbekannt'}\n` +
+            `Dieser Pfad funktioniert möglicherweise nicht.`);
+        }
+      } catch (e1) {
+        addLog('error', '❌ /nbi/configservice fehlgeschlagen', 
+          (e1 as Error).message);
+      }
+
+      // Test 2: /nbi/v1/configservice (mit v1)
+      addLog('info', '📍 Test 2/2: /nbi/v1/configservice', 'Teste API-Pfad mit /v1...');
+      try {
+        const response2 = await fetch(proxyUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'request',
+            ipAddress: ip,
+            endpoint: '/v1/configservice',
+            body: testXml,
+            sessionId: 'test-session'
+          })
+        });
+
+        const result2 = await response2.json();
+        
+        if (result2.ok && result2.status === 200) {
+          addLog('success', '✅ /nbi/v1/configservice funktioniert', 
+            'Der API-Pfad MIT /v1 ist korrekt!\n' +
+            'Die Session verwendet jetzt: /nbi/v1/configservice');
+        } else {
+          addLog('warning', `⚠️ /nbi/v1/configservice: HTTP ${result2.status}`, 
+            `Status: ${result2.statusText || 'Unbekannt'}\n` +
+            `Dieser Pfad funktioniert möglicherweise nicht.`);
+        }
+      } catch (e2) {
+        addLog('error', '❌ /nbi/v1/configservice fehlgeschlagen', 
+          (e2 as Error).message);
+      }
+
+      addLog('info', '🏁 API-Endpoint Test abgeschlossen', 
+        'Überprüfen Sie die Logs oben, um zu sehen, welcher Pfad funktioniert.\n\n' +
+        'Hinweis: CSM Versionen können unterschiedliche Pfade verwenden:\n' +
+        '  • Ältere Versionen: /nbi/configservice\n' +
+        '  • Neuere Versionen: /nbi/v1/configservice\n\n' +
+        'Der Proxy wurde entsprechend konfiguriert.');
+
+    } catch (error) {
+      addLog('error', 'API-Endpoint Test fehlgeschlagen', 
+        (error as Error).message);
+    }
+  };
+
   const testFMCConnection = async () => {
     if (!fmcConnection.ipAddress || !fmcConnection.username || !fmcConnection.password) {
       addLog('error', 'FMC Verbindung', 'Bitte alle Felder ausfüllen');
@@ -523,6 +620,15 @@ export const ConnectionPanel = ({
             >
               Diagnose starten
             </Button>
+            {connectionStatus.csm === 'connected' && (
+              <Button
+                onClick={testCSMApiEndpoints}
+                className="w-full"
+                variant="outline"
+              >
+                🧪 API-Pfade testen
+              </Button>
+            )}
           </div>
         </CardContent>
       </Card>
