@@ -9,6 +9,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { NetworkObject, ServiceObject, AccessList, AccessRule, LogEntry, ExportSelection, ExportSchema } from "../CiscoMigrationTool";
 import { CSMConnection } from "../CiscoMigrationTool";
 import { ExportConfigDialog } from "./ExportConfigDialog";
@@ -53,6 +54,11 @@ export const DataPanel = ({
   const [isExportConfigOpen, setIsExportConfigOpen] = useState(false);
   const [csmClient, setCsmClient] = useState<any>(null);
   const [selectedRule, setSelectedRule] = useState<AccessRule | null>(null);
+  
+  // Filter states for Access Lists
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'disabled'>('all');
+  const [actionFilter, setActionFilter] = useState<'all' | 'permit' | 'deny'>('all');
+  const [firewallFilter, setFirewallFilter] = useState<string>('all');
 
   const handleAdvancedExport = async (config: ExportConfig) => {
     setIsExporting(true);
@@ -464,23 +470,125 @@ export const DataPanel = ({
               <CardDescription>Access Control List Regeln aus dem Cisco Security Manager</CardDescription>
             </CardHeader>
             <CardContent>
+              {/* Filter Controls */}
+              <div className="mb-6 p-4 bg-muted/30 rounded-lg">
+                <h4 className="text-sm font-semibold mb-3">Filter</h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="status-filter" className="text-xs">Status</Label>
+                    <Select value={statusFilter} onValueChange={(value: any) => setStatusFilter(value)}>
+                      <SelectTrigger id="status-filter" className="bg-background">
+                        <SelectValue placeholder="Status wählen" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-background z-50">
+                        <SelectItem value="all">Alle</SelectItem>
+                        <SelectItem value="active">Aktiviert</SelectItem>
+                        <SelectItem value="disabled">Deaktiviert</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="action-filter" className="text-xs">Aktion</Label>
+                    <Select value={actionFilter} onValueChange={(value: any) => setActionFilter(value)}>
+                      <SelectTrigger id="action-filter" className="bg-background">
+                        <SelectValue placeholder="Aktion wählen" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-background z-50">
+                        <SelectItem value="all">Alle</SelectItem>
+                        <SelectItem value="permit">Permit</SelectItem>
+                        <SelectItem value="deny">Deny</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="firewall-filter" className="text-xs">Firewall</Label>
+                    <Select value={firewallFilter} onValueChange={setFirewallFilter}>
+                      <SelectTrigger id="firewall-filter" className="bg-background">
+                        <SelectValue placeholder="Firewall wählen" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-background z-50">
+                        <SelectItem value="all">Alle</SelectItem>
+                        {Array.from(new Set(accessLists.map(list => list.firewall))).map(fw => (
+                          <SelectItem key={fw} value={fw}>{fw}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                
+                {/* Active Filter Summary */}
+                {(statusFilter !== 'all' || actionFilter !== 'all' || firewallFilter !== 'all') && (
+                  <div className="mt-3 flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">Aktive Filter:</span>
+                    {statusFilter !== 'all' && (
+                      <Badge variant="outline" className="text-xs">
+                        Status: {statusFilter === 'active' ? 'Aktiviert' : 'Deaktiviert'}
+                      </Badge>
+                    )}
+                    {actionFilter !== 'all' && (
+                      <Badge variant="outline" className="text-xs">
+                        Aktion: {actionFilter}
+                      </Badge>
+                    )}
+                    {firewallFilter !== 'all' && (
+                      <Badge variant="outline" className="text-xs">
+                        Firewall: {firewallFilter}
+                      </Badge>
+                    )}
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="h-6 text-xs"
+                      onClick={() => {
+                        setStatusFilter('all');
+                        setActionFilter('all');
+                        setFirewallFilter('all');
+                      }}
+                    >
+                      Zurücksetzen
+                    </Button>
+                  </div>
+                )}
+              </div>
+              
               <ScrollArea className="h-[600px]">
                 {accessLists.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">
                     Keine Access Lists geladen
                   </div>
                 ) : (
-                  accessLists.map((list) => (
-                    <div key={list.id} className="mb-6">
-                      <div className="mb-3 p-3 bg-muted/30 rounded-lg">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <h3 className="font-semibold text-lg">{list.name}</h3>
-                            <p className="text-sm text-muted-foreground">Firewall: {list.firewall}</p>
+                  accessLists
+                    .filter(list => firewallFilter === 'all' || list.firewall === firewallFilter)
+                    .map((list) => {
+                      // Filter rules based on selected filters
+                      const filteredRules = list.rules.filter(rule => {
+                        const statusMatch = statusFilter === 'all' || 
+                          (statusFilter === 'active' && !rule.disabled) ||
+                          (statusFilter === 'disabled' && rule.disabled);
+                        
+                        const actionMatch = actionFilter === 'all' || rule.action === actionFilter;
+                        
+                        return statusMatch && actionMatch;
+                      });
+                      
+                      // Don't show list if no rules match filters
+                      if (filteredRules.length === 0) return null;
+                      
+                      return (
+                        <div key={list.id} className="mb-6">
+                          <div className="mb-3 p-3 bg-muted/30 rounded-lg">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <h3 className="font-semibold text-lg">{list.name}</h3>
+                                <p className="text-sm text-muted-foreground">Firewall: {list.firewall}</p>
+                              </div>
+                              <Badge variant="secondary">
+                                {filteredRules.length} {filteredRules.length !== list.rules.length ? `von ${list.rules.length}` : ''} Regeln
+                              </Badge>
+                            </div>
                           </div>
-                          <Badge variant="secondary">{list.rules.length} Regeln</Badge>
-                        </div>
-                      </div>
                       
                       <Table>
                         <TableHeader>
@@ -496,7 +604,7 @@ export const DataPanel = ({
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {list.rules.map((rule) => (
+                          {filteredRules.map((rule) => (
                             <TableRow 
                               key={rule.id}
                               className="cursor-pointer hover:bg-muted/50 transition-colors"
@@ -596,8 +704,9 @@ export const DataPanel = ({
                         </TableBody>
                       </Table>
                     </div>
-                  ))
-                )}
+                  );
+                })
+              )}
               </ScrollArea>
             </CardContent>
           </Card>
