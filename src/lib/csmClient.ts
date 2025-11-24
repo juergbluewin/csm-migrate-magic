@@ -196,7 +196,12 @@ export class CSMClient {
         const errorMessage = messageMatch?.[1] || statusText;
         
         if (codeMatch || messageMatch) {
-          errorDetails = `Error Code ${errorCode}: ${errorMessage}`;
+          // Provide more helpful hints for common generic errors
+          if (errorCode === '1' && /Unknown error/i.test(errorMessage)) {
+            errorDetails = `Error Code 1: Unknown error.\n\nMögliche Ursachen auf dem CSM-Server:\n- API-Lizenz für die Config API fehlt oder ist abgelaufen (Tools → Security Manager Administration → Licensing → NBI/API).\n- Der NBI-Dienst ist nicht vollständig initialisiert oder in einem Fehlerzustand.\n- Die angeforderte Operation (z.B. getPolicyObjectsListByType) wird von dieser CSM-Version/Konfiguration nicht unterstützt.`;
+          } else {
+            errorDetails = `Error Code ${errorCode}: ${errorMessage}`;
+          }
         }
         
         // Log full response for debugging
