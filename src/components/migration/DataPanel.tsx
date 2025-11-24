@@ -15,7 +15,7 @@ import { ExportConfigDialog } from "./ExportConfigDialog";
 import { ExportResultsPanel } from "./ExportResultsPanel";
 import { CSMExportService, ExportResult, ExportConfig } from "@/lib/csmExportService";
 
-import { Database, Search, Server, List, Shield, FileText, Settings, Zap } from "lucide-react";
+import { Database, Search, Server, List, Shield, FileText, Settings, Zap, CheckCircle, XCircle, FileWarning } from "lucide-react";
 interface DataPanelProps {
   networkObjects: NetworkObject[];
   serviceObjects: ServiceObject[];
@@ -459,30 +459,141 @@ export const DataPanel = ({
         <TabsContent value="acl">
           <Card>
             <CardHeader>
-              <CardTitle>Access Lists</CardTitle>
-              <CardDescription>Access Control Lists aus dem Cisco Security Manager (Device-spezifisch)</CardDescription>
+              <CardTitle>Access Lists - Regeln</CardTitle>
+              <CardDescription>Access Control List Regeln aus dem Cisco Security Manager</CardDescription>
             </CardHeader>
             <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Firewall</TableHead>
-                    <TableHead>Regeln</TableHead>
-                    <TableHead>Beschreibung</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {accessLists.map((list) => (
-                    <TableRow key={list.id}>
-                      <TableCell className="font-medium">{list.name}</TableCell>
-                      <TableCell><Badge variant="outline">{list.firewall}</Badge></TableCell>
-                      <TableCell><Badge variant="secondary">{list.rules.length} Regeln</Badge></TableCell>
-                      <TableCell className="text-muted-foreground">{list.description}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              <ScrollArea className="h-[600px]">
+                {accessLists.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    Keine Access Lists geladen
+                  </div>
+                ) : (
+                  accessLists.map((list) => (
+                    <div key={list.id} className="mb-6">
+                      <div className="mb-3 p-3 bg-muted/30 rounded-lg">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h3 className="font-semibold text-lg">{list.name}</h3>
+                            <p className="text-sm text-muted-foreground">Firewall: {list.firewall}</p>
+                          </div>
+                          <Badge variant="secondary">{list.rules.length} Regeln</Badge>
+                        </div>
+                      </div>
+                      
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-16">Pos.</TableHead>
+                            <TableHead>Regelname</TableHead>
+                            <TableHead>Quelle</TableHead>
+                            <TableHead>Ziel</TableHead>
+                            <TableHead>Service</TableHead>
+                            <TableHead className="w-24">Aktion</TableHead>
+                            <TableHead className="w-24">Status</TableHead>
+                            <TableHead>Logging</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {list.rules.map((rule) => (
+                            <TableRow key={rule.id}>
+                              <TableCell className="font-mono text-sm">{rule.position}</TableCell>
+                              <TableCell className="font-medium">{rule.name}</TableCell>
+                              <TableCell className="text-sm">
+                                {rule.source.length > 0 ? (
+                                  <div className="space-y-1">
+                                    {rule.source.slice(0, 2).map((src, idx) => (
+                                      <Badge key={idx} variant="outline" className="mr-1 mb-1 text-xs">
+                                        {src}
+                                      </Badge>
+                                    ))}
+                                    {rule.source.length > 2 && (
+                                      <Badge variant="secondary" className="text-xs">
+                                        +{rule.source.length - 2} mehr
+                                      </Badge>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-muted-foreground">any</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-sm">
+                                {rule.destination.length > 0 ? (
+                                  <div className="space-y-1">
+                                    {rule.destination.slice(0, 2).map((dst, idx) => (
+                                      <Badge key={idx} variant="outline" className="mr-1 mb-1 text-xs">
+                                        {dst}
+                                      </Badge>
+                                    ))}
+                                    {rule.destination.length > 2 && (
+                                      <Badge variant="secondary" className="text-xs">
+                                        +{rule.destination.length - 2} mehr
+                                      </Badge>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-muted-foreground">any</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-sm">
+                                {rule.services.length > 0 ? (
+                                  <div className="space-y-1">
+                                    {rule.services.slice(0, 2).map((svc, idx) => (
+                                      <Badge key={idx} variant="outline" className="mr-1 mb-1 text-xs">
+                                        {svc}
+                                      </Badge>
+                                    ))}
+                                    {rule.services.length > 2 && (
+                                      <Badge variant="secondary" className="text-xs">
+                                        +{rule.services.length - 2} mehr
+                                      </Badge>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-muted-foreground">any</span>
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                <Badge 
+                                  variant={rule.action === 'permit' ? 'default' : 'destructive'}
+                                  className="font-semibold"
+                                >
+                                  {rule.action}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex items-center gap-1">
+                                  {rule.disabled ? (
+                                    <>
+                                      <XCircle className="h-4 w-4 text-muted-foreground" />
+                                      <span className="text-xs text-muted-foreground">Deaktiviert</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <CheckCircle className="h-4 w-4 text-green-600" />
+                                      <span className="text-xs text-green-600">Aktiv</span>
+                                    </>
+                                  )}
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                {rule.logging && rule.logging !== 'default' ? (
+                                  <div className="flex items-center gap-1">
+                                    <FileWarning className="h-4 w-4 text-amber-600" />
+                                    <span className="text-xs">{rule.logging}</span>
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">Standard</span>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  ))
+                )}
+              </ScrollArea>
             </CardContent>
           </Card>
         </TabsContent>
