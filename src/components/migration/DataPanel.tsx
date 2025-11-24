@@ -52,6 +52,7 @@ export const DataPanel = ({
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
   const [isExportConfigOpen, setIsExportConfigOpen] = useState(false);
   const [csmClient, setCsmClient] = useState<any>(null);
+  const [selectedRule, setSelectedRule] = useState<AccessRule | null>(null);
 
   const handleAdvancedExport = async (config: ExportConfig) => {
     setIsExporting(true);
@@ -496,7 +497,11 @@ export const DataPanel = ({
                         </TableHeader>
                         <TableBody>
                           {list.rules.map((rule) => (
-                            <TableRow key={rule.id}>
+                            <TableRow 
+                              key={rule.id}
+                              className="cursor-pointer hover:bg-muted/50 transition-colors"
+                              onClick={() => setSelectedRule(rule)}
+                            >
                               <TableCell className="font-mono text-sm">{rule.position}</TableCell>
                               <TableCell className="font-medium">{rule.name}</TableCell>
                               <TableCell className="text-sm">
@@ -613,6 +618,125 @@ export const DataPanel = ({
         csmConnection={csmConnection}
         onExport={handleAdvancedExport}
       />
+
+      <Dialog open={!!selectedRule} onOpenChange={() => setSelectedRule(null)}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Regel-Details: {selectedRule?.name}</DialogTitle>
+            <DialogDescription>
+              Vollständige Informationen für Regel an Position {selectedRule?.position}
+            </DialogDescription>
+          </DialogHeader>
+          
+          {selectedRule && (
+            <div className="space-y-6">
+              {/* Status und Aktion */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <h4 className="text-sm font-semibold mb-2">Status</h4>
+                  <div className="flex items-center gap-2">
+                    {selectedRule.disabled ? (
+                      <>
+                        <XCircle className="h-5 w-5 text-muted-foreground" />
+                        <span>Deaktiviert</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="h-5 w-5 text-green-600" />
+                        <span>Aktiviert</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <h4 className="text-sm font-semibold mb-2">Aktion</h4>
+                  <Badge variant={selectedRule.action === 'permit' ? 'default' : 'destructive'} className="font-semibold">
+                    {selectedRule.action}
+                  </Badge>
+                </div>
+              </div>
+
+              {/* Quellen */}
+              <div>
+                <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                  <Server className="h-4 w-4" />
+                  Quellen ({selectedRule.source.length})
+                </h4>
+                <div className="flex flex-wrap gap-2">
+                  {selectedRule.source.length > 0 ? (
+                    selectedRule.source.map((src: string, i: number) => (
+                      <Badge key={i} variant="outline">
+                        {src}
+                      </Badge>
+                    ))
+                  ) : (
+                    <span className="text-sm text-muted-foreground">Keine Quellen (any)</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Ziele */}
+              <div>
+                <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                  <Database className="h-4 w-4" />
+                  Ziele ({selectedRule.destination.length})
+                </h4>
+                <div className="flex flex-wrap gap-2">
+                  {selectedRule.destination.length > 0 ? (
+                    selectedRule.destination.map((dst: string, i: number) => (
+                      <Badge key={i} variant="outline">
+                        {dst}
+                      </Badge>
+                    ))
+                  ) : (
+                    <span className="text-sm text-muted-foreground">Keine Ziele (any)</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Services */}
+              <div>
+                <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                  <Settings className="h-4 w-4" />
+                  Services ({selectedRule.services.length})
+                </h4>
+                <div className="flex flex-wrap gap-2">
+                  {selectedRule.services.length > 0 ? (
+                    selectedRule.services.map((svc: string, i: number) => (
+                      <Badge key={i} variant="outline">
+                        {svc}
+                      </Badge>
+                    ))
+                  ) : (
+                    <span className="text-sm text-muted-foreground">Keine Services (any)</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Logging */}
+              <div>
+                <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                  <FileWarning className="h-4 w-4" />
+                  Logging
+                </h4>
+                {selectedRule.logging && selectedRule.logging !== 'default' ? (
+                  <Badge variant="secondary">{selectedRule.logging}</Badge>
+                ) : (
+                  <span className="text-sm text-muted-foreground">Standard (kein spezielles Logging)</span>
+                )}
+              </div>
+
+              {/* Beschreibung */}
+              {selectedRule.description && (
+                <div>
+                  <h4 className="text-sm font-semibold mb-2">Beschreibung</h4>
+                  <p className="text-sm text-muted-foreground">{selectedRule.description}</p>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
