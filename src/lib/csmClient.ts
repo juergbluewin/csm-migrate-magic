@@ -31,6 +31,8 @@ interface CSMCLIQuery {
   argument?: string;
 }
 
+const generateReqId = () => Math.random().toString(16).slice(2, 10);
+
 export class CSMClient {
   private session: CSMSession | null = null;
 
@@ -124,12 +126,13 @@ export class CSMClient {
 
     // API Spec v2.4, Table 108: getPolicyObjectsListByType Request Format
     const requestXml = `<?xml version="1.0" encoding="UTF-8"?>
-<getPolicyObjectsListByTypeRequest xmlns="csm">
+<csm:getPolicyObjectsListByTypeRequest xmlns:csm="csm">
   <protVersion>1.0</protVersion>
+  <reqId>${generateReqId()}</reqId>
   <policyObjectType>${policyObjectType}</policyObjectType>
   <limit>${limit}</limit>
   <offset>${offset}</offset>
-</getPolicyObjectsListByTypeRequest>`;
+</csm:getPolicyObjectsListByTypeRequest>`;
 
     return this.request('/configservice', requestXml);
   }
@@ -216,12 +219,13 @@ export class CSMClient {
     // API Spec v2.4: getPolicyObject Request Format
     const wrapperTag = objectType === 'NetworkPolicyObject' ? 'networkPolicyObject' : 'servicePolicyObject';
     const requestXml = `<?xml version="1.0" encoding="UTF-8"?>
-<getPolicyObjectRequest xmlns="csm">
+<csm:getPolicyObjectRequest xmlns:csm="csm">
   <protVersion>1.0</protVersion>
+  <reqId>${generateReqId()}</reqId>
   <${wrapperTag}>
     <name>${objectName}</name>
   </${wrapperTag}>
-</getPolicyObjectRequest>`;
+</csm:getPolicyObjectRequest>`;
 
     return this.request('/configservice', requestXml);
   }
@@ -229,11 +233,12 @@ export class CSMClient {
   async getPolicyConfigByName(policyName: string, policyType: string = 'DeviceAccessRuleFirewallPolicy') {
     // API Spec v2.4, Table 68: getPolicyConfigByName Request Format
     const requestXml = `<?xml version="1.0" encoding="UTF-8"?>
-<getPolicyConfigByNameRequest xmlns="csm">
+<csm:getPolicyConfigByNameRequest xmlns:csm="csm">
   <protVersion>1.0</protVersion>
+  <reqId>${generateReqId()}</reqId>
   <policyName>${policyName}</policyName>
   <policyType>${policyType}</policyType>
-</getPolicyConfigByNameRequest>`;
+</csm:getPolicyConfigByNameRequest>`;
 
     return this.request('/configservice', requestXml);
   }
@@ -241,11 +246,12 @@ export class CSMClient {
   async getPolicyConfigByDeviceGID(deviceGID: string, policyType: string = 'DeviceAccessRuleFirewallPolicy') {
     // API Spec v2.4, Table 71: getPolicyConfigByDeviceGID Request Format  
     const requestXml = `<?xml version="1.0" encoding="UTF-8"?>
-<getPolicyConfigByDeviceGIDRequest xmlns="csm">
+<csm:getPolicyConfigByDeviceGIDRequest xmlns:csm="csm">
   <protVersion>1.0</protVersion>
+  <reqId>${generateReqId()}</reqId>
   <deviceGID>${deviceGID}</deviceGID>
   <policyType>${policyType}</policyType>
-</getPolicyConfigByDeviceGIDRequest>`;
+</csm:getPolicyConfigByDeviceGIDRequest>`;
 
     return this.request('/configservice', requestXml);
   }
@@ -253,12 +259,13 @@ export class CSMClient {
   async execDeviceReadOnlyCLICmds({ deviceIP, command, argument }: CSMCLIQuery) {
     // API Spec v2.4, Table 115: execDeviceReadOnlyCLICmds Request Format
     const requestXml = `<?xml version="1.0" encoding="UTF-8"?>
-<execDeviceReadOnlyCLICmdsRequest xmlns="csm">
+<csm:execDeviceReadOnlyCLICmdsRequest xmlns:csm="csm">
   <protVersion>1.0</protVersion>
+  <reqId>${generateReqId()}</reqId>
   <deviceIP>${deviceIP}</deviceIP>
   <cmd>${command}</cmd>
   ${argument ? `<argument>${argument}</argument>` : ''}
-</execDeviceReadOnlyCLICmdsRequest>`;
+</csm:execDeviceReadOnlyCLICmdsRequest>`;
 
     return this.request('/utilservice', requestXml);
   }
