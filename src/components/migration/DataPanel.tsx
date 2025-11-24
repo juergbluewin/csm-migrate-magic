@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { NetworkObject, ServiceObject, AccessList, AccessRule, LogEntry, ExportSelection, ExportSchema } from "../CiscoMigrationTool";
 import { CSMConnection } from "../CiscoMigrationTool";
 import { ExportConfigDialog } from "./ExportConfigDialog";
@@ -59,6 +60,10 @@ export const DataPanel = ({
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'disabled'>('all');
   const [actionFilter, setActionFilter] = useState<'all' | 'permit' | 'deny'>('all');
   const [firewallFilter, setFirewallFilter] = useState<string>('all');
+  
+  // Selection states for selective export
+  const [selectedLists, setSelectedLists] = useState<Set<string>>(new Set());
+  const [selectedRules, setSelectedRules] = useState<Set<string>>(new Set());
 
   const handleAdvancedExport = async (config: ExportConfig) => {
     setIsExporting(true);
@@ -303,6 +308,129 @@ export const DataPanel = ({
     }
   };
 
+  const toggleListSelection = (listId: string) => {
+    const newSelection = new Set(selectedLists);
+    if (newSelection.has(listId)) {
+      newSelection.delete(listId);
+      // Also deselect all rules from this list
+      const list = accessLists.find(l => l.id === listId);
+      if (list) {
+        const newRuleSelection = new Set(selectedRules);
+        list.rules.forEach(rule => newRuleSelection.delete(rule.id));
+        setSelectedRules(newRuleSelection);
+      }
+    } else {
+      newSelection.add(listId);
+    }
+    setSelectedLists(newSelection);
+  };
+
+  const toggleRuleSelection = (ruleId: string, listId: string) => {
+    const newSelection = new Set(selectedRules);
+    if (newSelection.has(ruleId)) {
+      newSelection.delete(ruleId);
+    } else {
+      newSelection.add(ruleId);
+      // Auto-select parent list
+      setSelectedLists(prev => new Set(prev).add(listId));
+    }
+    setSelectedRules(newSelection);
+  };
+
+  const selectAllVisibleRules = () => {
+    const newRuleSelection = new Set<string>();
+    const newListSelection = new Set<string>();
+    
+    accessLists
+      .filter(list => firewallFilter === 'all' || list.firewall === firewallFilter)
+      .forEach(list => {
+        const filteredRules = list.rules.filter(rule => {
+          const statusMatch = statusFilter === 'all' || 
+            (statusFilter === 'active' && !rule.disabled) ||
+            (statusFilter === 'disabled' && rule.disabled);
+          const actionMatch = actionFilter === 'all' || rule.action === actionFilter;
+          return statusMatch && actionMatch;
+        });
+        
+        if (filteredRules.length > 0) {
+          newListSelection.add(list.id);
+          filteredRules.forEach(rule => newRuleSelection.add(rule.id));
+        }
+      });
+    
+    setSelectedRules(newRuleSelection);
+    setSelectedLists(newListSelection);
+  };
+
+  const clearSelection = () => {
+    setSelectedRules(new Set());
+    setSelectedLists(new Set());
+  };
+
+  const exportSelectedRules = () => {
+    if (selectedRules.size === 0) {
+      addLog('warning', 'Keine Auswahl', 'Bitte wählen Sie mindestens eine Regel zum Exportieren aus');
+      return;
+    }
+
+    // Collect selected rules
+    const selectedData: any[] = [];
+    accessLists.forEach(list => {
+      list.rules.forEach(rule => {
+        if (selectedRules.has(rule.id)) {
+          selectedData.push({
+            firewall: list.firewall,
+            aclName: list.name,
+            position: rule.position,
+            name: rule.name,
+            source: rule.source.join(', '),
+            destination: rule.destination.join(', '),
+            services: rule.services.join(', '),
+            action: rule.action,
+            status: rule.disabled ? 'deaktiviert' : 'aktiviert',
+            logging: rule.logging || 'default',
+            description: rule.description || ''
+          });
+        }
+      });
+    });
+
+    // Convert to CSV
+    const headers = ['Firewall', 'ACL Name', 'Position', 'Regelname', 'Quelle', 'Ziel', 'Services', 'Aktion', 'Status', 'Logging', 'Beschreibung'];
+    const csvContent = [
+      headers.join(','),
+      ...selectedData.map(row => 
+        [
+          row.firewall,
+          row.aclName,
+          row.position,
+          row.name,
+          `"${row.source}"`,
+          `"${row.destination}"`,
+          `"${row.services}"`,
+          row.action,
+          row.status,
+          row.logging,
+          `"${row.description}"`
+        ].join(',')
+      )
+    ].join('\n');
+
+    // Download file
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `access-lists-export-${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    addLog('success', 'Export erfolgreich', `${selectedData.length} Regeln exportiert`);
+  };
+
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -471,9 +599,10 @@ export const DataPanel = ({
             </CardHeader>
             <CardContent>
               {/* Filter Controls */}
-              <div className="mb-6 p-4 bg-muted/30 rounded-lg">
-                <h4 className="text-sm font-semibold mb-3">Filter</h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="mb-6 p-4 bg-muted/30 rounded-lg space-y-4">
+                <div>
+                  <h4 className="text-sm font-semibold mb-3">Filter</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="status-filter" className="text-xs">Status</Label>
                     <Select value={statusFilter} onValueChange={(value: any) => setStatusFilter(value)}>
@@ -551,6 +680,44 @@ export const DataPanel = ({
                     </Button>
                   </div>
                 )}
+                </div>
+                
+                {/* Selection Controls */}
+                <div className="border-t pt-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold">Auswahl:</span>
+                      <Badge variant="secondary">{selectedRules.size} Regeln ausgewählt</Badge>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={selectAllVisibleRules}
+                        disabled={accessLists.length === 0}
+                      >
+                        Alle sichtbaren auswählen
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={clearSelection}
+                        disabled={selectedRules.size === 0}
+                      >
+                        Auswahl aufheben
+                      </Button>
+                      <Button 
+                        size="sm"
+                        onClick={exportSelectedRules}
+                        disabled={selectedRules.size === 0}
+                        className="flex items-center gap-2"
+                      >
+                        <FileText className="h-4 w-4" />
+                        Ausgewählte exportieren
+                      </Button>
+                    </div>
+                  </div>
+                </div>
               </div>
               
               <ScrollArea className="h-[600px]">
@@ -580,9 +747,15 @@ export const DataPanel = ({
                         <div key={list.id} className="mb-6">
                           <div className="mb-3 p-3 bg-muted/30 rounded-lg">
                             <div className="flex items-center justify-between">
-                              <div>
-                                <h3 className="font-semibold text-lg">{list.name}</h3>
-                                <p className="text-sm text-muted-foreground">Firewall: {list.firewall}</p>
+                              <div className="flex items-center gap-3">
+                                <Checkbox
+                                  checked={selectedLists.has(list.id)}
+                                  onCheckedChange={() => toggleListSelection(list.id)}
+                                />
+                                <div>
+                                  <h3 className="font-semibold text-lg">{list.name}</h3>
+                                  <p className="text-sm text-muted-foreground">Firewall: {list.firewall}</p>
+                                </div>
                               </div>
                               <Badge variant="secondary">
                                 {filteredRules.length} {filteredRules.length !== list.rules.length ? `von ${list.rules.length}` : ''} Regeln
@@ -593,6 +766,7 @@ export const DataPanel = ({
                       <Table>
                         <TableHeader>
                           <TableRow>
+                            <TableHead className="w-12"></TableHead>
                             <TableHead className="w-16">Pos.</TableHead>
                             <TableHead>Regelname</TableHead>
                             <TableHead>Quelle</TableHead>
@@ -607,12 +781,31 @@ export const DataPanel = ({
                           {filteredRules.map((rule) => (
                             <TableRow 
                               key={rule.id}
-                              className="cursor-pointer hover:bg-muted/50 transition-colors"
-                              onClick={() => setSelectedRule(rule)}
+                              className={`cursor-pointer transition-colors ${selectedRules.has(rule.id) ? 'bg-muted/50' : 'hover:bg-muted/30'}`}
                             >
-                              <TableCell className="font-mono text-sm">{rule.position}</TableCell>
-                              <TableCell className="font-medium">{rule.name}</TableCell>
-                              <TableCell className="text-sm">
+                              <TableCell>
+                                <Checkbox
+                                  checked={selectedRules.has(rule.id)}
+                                  onCheckedChange={() => toggleRuleSelection(rule.id, list.id)}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              </TableCell>
+                              <TableCell 
+                                className="font-mono text-sm"
+                                onClick={() => setSelectedRule(rule)}
+                              >
+                                {rule.position}
+                              </TableCell>
+                              <TableCell 
+                                className="font-medium"
+                                onClick={() => setSelectedRule(rule)}
+                              >
+                                {rule.name}
+                              </TableCell>
+                              <TableCell 
+                                className="text-sm"
+                                onClick={() => setSelectedRule(rule)}
+                              >
                                 {rule.source.length > 0 ? (
                                   <div className="space-y-1">
                                     {rule.source.slice(0, 2).map((src, idx) => (
@@ -630,7 +823,10 @@ export const DataPanel = ({
                                   <span className="text-muted-foreground">any</span>
                                 )}
                               </TableCell>
-                              <TableCell className="text-sm">
+                              <TableCell 
+                                className="text-sm"
+                                onClick={() => setSelectedRule(rule)}
+                              >
                                 {rule.destination.length > 0 ? (
                                   <div className="space-y-1">
                                     {rule.destination.slice(0, 2).map((dst, idx) => (
@@ -648,7 +844,10 @@ export const DataPanel = ({
                                   <span className="text-muted-foreground">any</span>
                                 )}
                               </TableCell>
-                              <TableCell className="text-sm">
+                              <TableCell 
+                                className="text-sm"
+                                onClick={() => setSelectedRule(rule)}
+                              >
                                 {rule.services.length > 0 ? (
                                   <div className="space-y-1">
                                     {rule.services.slice(0, 2).map((svc, idx) => (
@@ -666,7 +865,7 @@ export const DataPanel = ({
                                   <span className="text-muted-foreground">any</span>
                                 )}
                               </TableCell>
-                              <TableCell>
+                              <TableCell onClick={() => setSelectedRule(rule)}>
                                 <Badge 
                                   variant={rule.action === 'permit' ? 'default' : 'destructive'}
                                   className="font-semibold"
@@ -674,7 +873,7 @@ export const DataPanel = ({
                                   {rule.action}
                                 </Badge>
                               </TableCell>
-                              <TableCell>
+                              <TableCell onClick={() => setSelectedRule(rule)}>
                                 <div className="flex items-center gap-1">
                                   {rule.disabled ? (
                                     <>
@@ -689,7 +888,7 @@ export const DataPanel = ({
                                   )}
                                 </div>
                               </TableCell>
-                              <TableCell>
+                              <TableCell onClick={() => setSelectedRule(rule)}>
                                 {rule.logging && rule.logging !== 'default' ? (
                                   <div className="flex items-center gap-1">
                                     <FileWarning className="h-4 w-4 text-amber-600" />
