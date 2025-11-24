@@ -41,6 +41,10 @@ export interface NetworkObject {
   name: string;
   type: 'host' | 'network' | 'range' | 'group';
   value: string;
+  ipAddress?: string;
+  netmask?: string;
+  startIp?: string;
+  endIp?: string;
   description?: string;
   firewall?: string;
 }
@@ -58,6 +62,8 @@ export interface ServiceObject {
   name: string;
   protocol: 'tcp' | 'udp' | 'icmp' | 'any';
   ports: string;
+  sourcePort?: string;
+  destPort?: string;
   description?: string;
 }
 

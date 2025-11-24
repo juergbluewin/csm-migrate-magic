@@ -312,16 +312,11 @@ export class CSMClient {
 // XML Parser utilities
 export class CSMXMLParser {
   static parseNetworkObjects(xmlData: string): any[] {
-    // Simple XML parsing for network objects
-    // In production, use a proper XML parser like DOMParser
     const objects: any[] = [];
     
-    // This is a simplified parser - in production you'd use DOMParser
-    // or a proper XML parsing library
     const parser = new DOMParser();
     const doc = parser.parseFromString(xmlData, 'text/xml');
     
-    // Parse network objects from XML response
     const networkObjects = doc.querySelectorAll('networkPolicyObject');
     networkObjects.forEach((obj, index) => {
       const name = obj.querySelector('name')?.textContent || `object-${index}`;
@@ -329,10 +324,42 @@ export class CSMXMLParser {
       const value = obj.querySelector('value')?.textContent || '';
       const description = obj.querySelector('description')?.textContent || '';
       
+      // Parse IP details from value
+      let ipAddress = '';
+      let netmask = '';
+      let startIp = '';
+      let endIp = '';
+      
+      if (kind === 'host') {
+        ipAddress = value;
+      } else if (kind === 'subnet') {
+        // Format: "192.168.1.0/24" or "192.168.1.0 255.255.255.0"
+        if (value.includes('/')) {
+          const parts = value.split('/');
+          ipAddress = parts[0];
+          netmask = parts[1]; // CIDR notation
+        } else if (value.includes(' ')) {
+          const parts = value.split(' ');
+          ipAddress = parts[0];
+          netmask = parts[1]; // Subnet mask
+        }
+      } else if (kind === 'range') {
+        // Format: "192.168.1.1-192.168.1.254"
+        if (value.includes('-')) {
+          const parts = value.split('-');
+          startIp = parts[0];
+          endIp = parts[1];
+        }
+      }
+      
       objects.push({
         name,
         kind,
         value,
+        ipAddress,
+        netmask,
+        startIp,
+        endIp,
         description
       });
     });
@@ -353,10 +380,27 @@ export class CSMXMLParser {
       const ports = obj.querySelector('ports')?.textContent || '';
       const description = obj.querySelector('description')?.textContent || '';
       
+      // Parse port details
+      let sourcePort = '';
+      let destPort = '';
+      
+      // Format can be: "80", "1024-65535", "any", "eq 80", "range 1024 65535"
+      if (ports.includes('-') && !ports.includes('range')) {
+        destPort = ports; // Range like "1024-65535"
+      } else if (ports.startsWith('eq ')) {
+        destPort = ports.replace('eq ', ''); // Single port
+      } else if (ports.startsWith('range ')) {
+        destPort = ports.replace('range ', '').replace(' ', '-'); // Convert to "1024-65535"
+      } else {
+        destPort = ports;
+      }
+      
       objects.push({
         name,
         protocol,
         ports,
+        sourcePort,
+        destPort,
         description
       });
     });

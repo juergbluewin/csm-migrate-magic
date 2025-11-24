@@ -220,6 +220,10 @@ export const DataPanel = ({
         name: n.name,
         type: (n.kind === 'host' ? 'host' : n.kind === 'subnet' ? 'network' : n.kind === 'range' ? 'range' : 'group') as NetworkObject['type'],
         value: n.value,
+        ipAddress: n.ipAddress,
+        netmask: n.netmask,
+        startIp: n.startIp,
+        endIp: n.endIp,
         description: n.description,
       }));
       onNetworkObjectsChange(nObjs);
@@ -229,6 +233,8 @@ export const DataPanel = ({
         name: s.name,
         protocol: s.protocol || 'any',
         ports: s.ports || '',
+        sourcePort: s.sourcePort,
+        destPort: s.destPort,
         description: s.description,
       }));
       onServiceObjectsChange(sObjs);
@@ -388,7 +394,8 @@ export const DataPanel = ({
                   <TableRow>
                     <TableHead>Name</TableHead>
                     <TableHead>Typ</TableHead>
-                    <TableHead>Wert</TableHead>
+                    <TableHead>IP-Adresse</TableHead>
+                    <TableHead>Subnetzmaske/Bereich</TableHead>
                     <TableHead>Beschreibung</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -397,7 +404,16 @@ export const DataPanel = ({
                     <TableRow key={obj.id}>
                       <TableCell className="font-medium">{obj.name}</TableCell>
                       <TableCell><Badge>{obj.type}</Badge></TableCell>
-                      <TableCell className="font-mono text-sm">{obj.value}</TableCell>
+                      <TableCell className="font-mono text-sm">
+                        {obj.type === 'host' && obj.ipAddress}
+                        {obj.type === 'network' && obj.ipAddress}
+                        {obj.type === 'range' && obj.startIp}
+                        {!obj.ipAddress && !obj.startIp && obj.value}
+                      </TableCell>
+                      <TableCell className="font-mono text-sm">
+                        {obj.type === 'network' && obj.netmask}
+                        {obj.type === 'range' && obj.endIp && `bis ${obj.endIp}`}
+                      </TableCell>
                       <TableCell className="text-muted-foreground">{obj.description}</TableCell>
                     </TableRow>
                   ))}
@@ -419,7 +435,8 @@ export const DataPanel = ({
                   <TableRow>
                     <TableHead>Name</TableHead>
                     <TableHead>Protokoll</TableHead>
-                    <TableHead>Ports</TableHead>
+                    <TableHead>Source Port</TableHead>
+                    <TableHead>Destination Port</TableHead>
                     <TableHead>Beschreibung</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -428,7 +445,8 @@ export const DataPanel = ({
                     <TableRow key={svc.id}>
                       <TableCell className="font-medium">{svc.name}</TableCell>
                       <TableCell><Badge>{svc.protocol.toUpperCase()}</Badge></TableCell>
-                      <TableCell className="font-mono text-sm">{svc.ports}</TableCell>
+                      <TableCell className="font-mono text-sm">{svc.sourcePort || 'any'}</TableCell>
+                      <TableCell className="font-mono text-sm">{svc.destPort || svc.ports}</TableCell>
                       <TableCell className="text-muted-foreground">{svc.description}</TableCell>
                     </TableRow>
                   ))}
