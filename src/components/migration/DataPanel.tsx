@@ -151,26 +151,14 @@ export const DataPanel = ({
       if (exportSelection.networkObjects) {
         console.log('📦 Lade Network Objects...');
         addLog('info', 'Network Objects', 'Lade Network Objects...');
-        let offset = 0;
-        let hasMore = true;
         
-        while (hasMore) {
-          console.log(`  → Lade Network Objects batch (offset: ${offset})`);
-          const xmlData = await client.getPolicyObjectsList({
-            policyObjectType: 'NetworkPolicyObject',
-            limit: 100,
-            offset
-          });
-          
-          console.log(`  → Erhalte XML (Länge: ${xmlData?.length || 0})`);
-          const objects = CSMXMLParser.parseNetworkObjects(xmlData);
-          console.log(`  → Geparst: ${objects.length} Objekte`);
-          allNetworkObjects.push(...objects);
-          
-          // Simple pagination check - if we got less than limit, we're done
-          hasMore = objects.length === 100;
-          offset += 100;
-        }
+        const xmlData = await client.getPolicyObjectsList({
+          policyObjectType: 'NetworkPolicyObject'
+        });
+        
+        console.log(`  → Erhalte XML (Länge: ${xmlData?.length || 0})`);
+        allNetworkObjects = CSMXMLParser.parseNetworkObjects(xmlData);
+        console.log(`  → Geparst: ${allNetworkObjects.length} Objekte`);
         
         console.log(`✅ Network Objects fertig: ${allNetworkObjects.length} Objekte`);
         addLog('success', 'Network Objects', `${allNetworkObjects.length} Network Objects geladen`);
@@ -180,25 +168,14 @@ export const DataPanel = ({
       if (exportSelection.serviceObjects) {
         console.log('📦 Lade Service Objects...');
         addLog('info', 'Service Objects', 'Lade Service Objects...');
-        let offset = 0;
-        let hasMore = true;
         
-        while (hasMore) {
-          console.log(`  → Lade Service Objects batch (offset: ${offset})`);
-          const xmlData = await client.getPolicyObjectsList({
-            policyObjectType: 'ServicePolicyObject',
-            limit: 100,
-            offset
-          });
-          
-          console.log(`  → Erhalte XML (Länge: ${xmlData?.length || 0})`);
-          const objects = CSMXMLParser.parseServiceObjects(xmlData);
-          console.log(`  → Geparst: ${objects.length} Objekte`);
-          allServiceObjects.push(...objects);
-          
-          hasMore = objects.length === 100;
-          offset += 100;
-        }
+        const xmlData = await client.getPolicyObjectsList({
+          policyObjectType: 'ServicePolicyObject'
+        });
+        
+        console.log(`  → Erhalte XML (Länge: ${xmlData?.length || 0})`);
+        allServiceObjects = CSMXMLParser.parseServiceObjects(xmlData);
+        console.log(`  → Geparst: ${allServiceObjects.length} Objekte`);
         
         console.log(`✅ Service Objects fertig: ${allServiceObjects.length} Objekte`);
         addLog('success', 'Service Objects', `${allServiceObjects.length} Service Objects geladen`);
