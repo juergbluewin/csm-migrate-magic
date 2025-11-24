@@ -414,22 +414,71 @@ export class CSMXMLParser {
     const parser = new DOMParser();
     const doc = parser.parseFromString(xmlData, 'text/xml');
     
-    const accessRules = doc.querySelectorAll('accessRule');
-    accessRules.forEach((rule, index) => {
-      const name = rule.querySelector('name')?.textContent || `rule-${index}`;
-      const action = rule.querySelector('action')?.textContent || 'permit';
-      const source = Array.from(rule.querySelectorAll('source')).map(s => s.textContent || '');
-      const destination = Array.from(rule.querySelectorAll('destination')).map(d => d.textContent || '');
-      const services = Array.from(rule.querySelectorAll('service')).map(s => s.textContent || '');
-      const disabled = rule.querySelector('disabled')?.textContent === 'true';
-      const logging = rule.querySelector('logging')?.textContent || 'default';
-      
+    // CSM liefert deviceAccessRuleFirewallPolicy statt accessRule
+    const accessPolicies = doc.querySelectorAll('deviceAccessRuleFirewallPolicy');
+    
+    accessPolicies.forEach((policy, index) => {
+      const name =
+        policy.querySelector('name')?.textContent ||
+        policy.querySelector('gid')?.textContent ||
+        `rule-${index}`;
+
+      // CSM hat <permit>true/false</permit>
+      const permitText = policy.querySelector('permit')?.textContent?.toLowerCase() || 'true';
+      const action = permitText === 'true' ? 'permit' : 'deny';
+
+      // Quellen: unter <sources> mit verschiedenen Unterelementen
+      const sourcesNode = policy.querySelector('sources');
+      const sources: string[] = [];
+      if (sourcesNode) {
+        sources.push(
+          ...Array.from(sourcesNode.querySelectorAll('networkObjectGIDs > gid')).map(
+            n => n.textContent || ''
+          ),
+          ...Array.from(sourcesNode.querySelectorAll('ipv4Data')).map(
+            n => n.textContent || ''
+          )
+        );
+      }
+
+      // Ziele: analog unter <destinations>
+      const destinationsNode = policy.querySelector('destinations');
+      const destinations: string[] = [];
+      if (destinationsNode) {
+        destinations.push(
+          ...Array.from(destinationsNode.querySelectorAll('networkObjectGIDs > gid')).map(
+            n => n.textContent || ''
+          ),
+          ...Array.from(destinationsNode.querySelectorAll('ipv4Data')).map(
+            n => n.textContent || ''
+          )
+        );
+      }
+
+      // Services: unter <services>, i. d. R. GIDs für ServicePolicyObject
+      const servicesNode = policy.querySelector('services');
+      const services: string[] = [];
+      if (servicesNode) {
+        services.push(
+          ...Array.from(servicesNode.querySelectorAll('serviceObjectGIDs > gid')).map(
+            n => n.textContent || ''
+          )
+        );
+      }
+
+      const disabled = policy.querySelector('isEnabled')?.textContent === 'false';
+
+      const logging =
+        policy.querySelector('logOptions > iosOptions')?.textContent ||
+        policy.querySelector('logOptions > logOption')?.textContent ||
+        '';
+
       rules.push({
         policy: 'imported',
         position: index + 1,
         name,
-        source,
-        destination,
+        source: sources,
+        destination: destinations,
         services,
         action,
         disabled,
