@@ -195,6 +195,7 @@ export const DataPanel = ({
 
       // Load Access Lists/Rules
       if (exportSelection.accessLists) {
+        console.log('📋 Lade Access Lists...');
         addLog('info', 'Access Lists', 'Lade Access Rules...');
         
         if (exportSelection.aclSource === 'policy') {
@@ -203,26 +204,40 @@ export const DataPanel = ({
           if (policyName) {
             let xmlData: string;
             if (exportSelection.policyName) {
+              console.log(`  → Policy Name: ${exportSelection.policyName}`);
               xmlData = await client.getPolicyConfigByName(exportSelection.policyName);
             } else if (exportSelection.deviceGid) {
+              console.log(`  → Device GID: ${exportSelection.deviceGid}`);
               xmlData = await client.getPolicyConfigByDeviceGID(exportSelection.deviceGid);
             } else {
               throw new Error('Policy name or device GID required');
             }
             
+            console.log(`  → Erhalte XML (Länge: ${xmlData?.length || 0})`);
             allAccessRules = CSMXMLParser.parseAccessRules(xmlData);
+            console.log(`  → Geparst: ${allAccessRules.length} Regeln`);
+          } else {
+            console.warn('⚠️ Access Lists ausgewählt, aber keine Policy/Device GID angegeben');
+            addLog('warning', 'Access Lists', 'Keine Policy oder Device GID ausgewählt. Bitte im "Auswahl"-Tab eine Firewall auswählen.');
           }
         } else if (exportSelection.aclSource === 'cli' && exportSelection.deviceIp && exportSelection.cliCommand) {
           // Load from CLI
+          console.log(`  → CLI: ${exportSelection.deviceIp} - ${exportSelection.cliCommand}`);
           const xmlData = await client.execDeviceReadOnlyCLICmds({
             deviceIP: exportSelection.deviceIp,
             command: 'show',
             argument: exportSelection.cliCommand.replace('show ', '')
           });
           
+          console.log(`  → Erhalte CLI Output (Länge: ${xmlData?.length || 0})`);
           allAccessRules = CSMXMLParser.parseAccessRules(xmlData);
+          console.log(`  → Geparst: ${allAccessRules.length} Regeln`);
+        } else {
+          console.warn('⚠️ Access Lists ausgewählt, aber keine Quelle (policy/cli) konfiguriert');
+          addLog('warning', 'Access Lists', 'Keine ACL-Quelle konfiguriert. Bitte im "Auswahl"-Tab eine Quelle auswählen.');
         }
         
+        console.log(`✅ Access Lists fertig: ${allAccessRules.length} Regeln`);
         addLog('success', 'Access Lists', `${allAccessRules.length} Access Rules geladen`);
       }
 
@@ -902,10 +917,10 @@ export const DataPanel = ({
                           ))}
                         </TableBody>
                       </Table>
-                    </div>
-                  );
-                })
-              )}
+                        </div>
+                      );
+                    })
+                )}
               </ScrollArea>
             </CardContent>
           </Card>
