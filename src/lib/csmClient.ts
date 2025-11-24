@@ -121,20 +121,18 @@ export class CSMClient {
     }
   }
 
-  async getPolicyObjectsList({ policyObjectType, limit = 100, offset = 0 }: CSMObjectQuery) {
+  async getPolicyObjectsList({ policyObjectType }: CSMObjectQuery) {
     if (!this.session) throw new Error('Nicht mit CSM verbunden');
 
     // API Spec v2.4, Table 108: getPolicyObjectsListByType Request Format
     const requestXml = `<?xml version="1.0" encoding="UTF-8"?>
-<csm:getPolicyObjectsListByTypeRequest xmlns:csm="csm">
+<csm:policyObjectsListByTypeRequest xmlns:csm="csm">
   <protVersion>1.0</protVersion>
   <reqId>${generateReqId()}</reqId>
   <policyObjectType>${policyObjectType}</policyObjectType>
-  <limit>${limit}</limit>
-  <offset>${offset}</offset>
-</csm:getPolicyObjectsListByTypeRequest>`;
+</csm:policyObjectsListByTypeRequest>`;
 
-    return this.request('/configservice', requestXml);
+    return this.request('/configservice/getPolicyObjectsListByType', requestXml);
   }
 
   private async request(endpoint: string, body: string) {
