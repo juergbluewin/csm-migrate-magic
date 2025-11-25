@@ -364,7 +364,22 @@ export const DataPanel = ({
             (statusFilter === 'active' && !rule.disabled) ||
             (statusFilter === 'disabled' && rule.disabled);
           const actionMatch = actionFilter === 'all' || rule.action === actionFilter;
-          return statusMatch && actionMatch;
+          
+          // Apply search filter
+          let searchMatch = true;
+          if (searchTerm && searchTerm.trim() !== '') {
+            const searchLower = searchTerm.toLowerCase().trim();
+            const nameMatch = rule.name?.toLowerCase().includes(searchLower) || false;
+            const sourceMatch = rule.source?.some(s => s?.toLowerCase().includes(searchLower)) || false;
+            const destMatch = rule.destination?.some(d => d?.toLowerCase().includes(searchLower)) || false;
+            const serviceMatch = rule.services?.some(svc => svc?.toLowerCase().includes(searchLower)) || false;
+            const descMatch = rule.description?.toLowerCase().includes(searchLower) || false;
+            const posMatch = rule.position?.toString().includes(searchLower) || false;
+            
+            searchMatch = nameMatch || sourceMatch || destMatch || serviceMatch || descMatch || posMatch;
+          }
+          
+          return statusMatch && actionMatch && searchMatch;
         });
         
         if (filteredRules.length > 0) {
@@ -645,8 +660,28 @@ export const DataPanel = ({
               <CardDescription>Access Control List Regeln aus dem Cisco Security Manager</CardDescription>
             </CardHeader>
             <CardContent>
-              {/* Filter Controls */}
+              {/* Search and Filter Controls */}
               <div className="mb-6 p-4 bg-muted/30 rounded-lg space-y-4">
+                {/* Search Bar */}
+                <div className="space-y-2">
+                  <Label htmlFor="acl-search" className="text-xs">Suche in Regeln</Label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="acl-search"
+                      placeholder="Regelname, Quelle, Ziel oder Service durchsuchen..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-9 bg-background"
+                    />
+                  </div>
+                  {searchTerm && (
+                    <p className="text-xs text-muted-foreground">
+                      Suche nach: "{searchTerm}"
+                    </p>
+                  )}
+                </div>
+                
                 <div>
                   <h4 className="text-sm font-semibold mb-3">Filter</h4>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -785,15 +820,31 @@ export const DataPanel = ({
                   accessLists
                     .filter(list => firewallFilter === 'all' || list.firewall === firewallFilter)
                     .map((list) => {
-                      // Filter rules based on selected filters
+                      // Filter rules based on selected filters and search term
                       const filteredRules = list.rules.filter(rule => {
+                        // Status filter
                         const statusMatch = statusFilter === 'all' || 
                           (statusFilter === 'active' && !rule.disabled) ||
                           (statusFilter === 'disabled' && rule.disabled);
                         
+                        // Action filter
                         const actionMatch = actionFilter === 'all' || rule.action === actionFilter;
                         
-                        return statusMatch && actionMatch;
+                        // Search filter - search in multiple fields
+                        let searchMatch = true;
+                        if (searchTerm && searchTerm.trim() !== '') {
+                          const searchLower = searchTerm.toLowerCase().trim();
+                          const nameMatch = rule.name?.toLowerCase().includes(searchLower) || false;
+                          const sourceMatch = rule.source?.some(s => s?.toLowerCase().includes(searchLower)) || false;
+                          const destMatch = rule.destination?.some(d => d?.toLowerCase().includes(searchLower)) || false;
+                          const serviceMatch = rule.services?.some(svc => svc?.toLowerCase().includes(searchLower)) || false;
+                          const descMatch = rule.description?.toLowerCase().includes(searchLower) || false;
+                          const posMatch = rule.position?.toString().includes(searchLower) || false;
+                          
+                          searchMatch = nameMatch || sourceMatch || destMatch || serviceMatch || descMatch || posMatch;
+                        }
+                        
+                        return statusMatch && actionMatch && searchMatch;
                       });
                       
                       // Don't show list if no rules match filters
