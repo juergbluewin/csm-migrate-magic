@@ -769,8 +769,17 @@ export const DataPanel = ({
               
               <ScrollArea className="h-[600px]">
                 {accessLists.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    Keine Access Lists geladen
+                  <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+                    <Shield className="h-16 w-16 text-muted-foreground/50 mb-4" />
+                    <h3 className="text-lg font-semibold mb-2">Keine Access Lists geladen</h3>
+                    <p className="text-sm text-muted-foreground max-w-md mb-4">
+                      Klicken Sie auf "Daten laden" um Access Lists vom CSM abzurufen. 
+                      Stellen Sie sicher, dass im "Auswahl"-Tab eine Firewall und ACL-Quelle ausgewählt ist.
+                    </p>
+                    <Button onClick={loadDataFromCSM} className="flex items-center gap-2">
+                      <Database className="h-4 w-4" />
+                      Daten laden
+                    </Button>
                   </div>
                 ) : (
                   accessLists
@@ -841,23 +850,23 @@ export const DataPanel = ({
                                 className="font-mono text-sm"
                                 onClick={() => setSelectedRule(rule)}
                               >
-                                {rule.position}
+                                {rule.position || '-'}
                               </TableCell>
                               <TableCell 
                                 className="font-medium"
                                 onClick={() => setSelectedRule(rule)}
                               >
-                                {rule.name}
+                                {rule.name || 'Unnamed Rule'}
                               </TableCell>
                               <TableCell 
                                 className="text-sm"
                                 onClick={() => setSelectedRule(rule)}
                               >
-                                {rule.source.length > 0 ? (
+                                {rule.source && rule.source.length > 0 ? (
                                   <div className="space-y-1">
                                     {rule.source.slice(0, 2).map((src, idx) => (
                                       <Badge key={idx} variant="outline" className="mr-1 mb-1 text-xs">
-                                        {src}
+                                        {src || 'any'}
                                       </Badge>
                                     ))}
                                     {rule.source.length > 2 && (
@@ -867,18 +876,18 @@ export const DataPanel = ({
                                     )}
                                   </div>
                                 ) : (
-                                  <span className="text-muted-foreground">any</span>
+                                  <span className="text-muted-foreground text-xs">any</span>
                                 )}
                               </TableCell>
                               <TableCell 
                                 className="text-sm"
                                 onClick={() => setSelectedRule(rule)}
                               >
-                                {rule.destination.length > 0 ? (
+                                {rule.destination && rule.destination.length > 0 ? (
                                   <div className="space-y-1">
                                     {rule.destination.slice(0, 2).map((dst, idx) => (
                                       <Badge key={idx} variant="outline" className="mr-1 mb-1 text-xs">
-                                        {dst}
+                                        {dst || 'any'}
                                       </Badge>
                                     ))}
                                     {rule.destination.length > 2 && (
@@ -888,18 +897,18 @@ export const DataPanel = ({
                                     )}
                                   </div>
                                 ) : (
-                                  <span className="text-muted-foreground">any</span>
+                                  <span className="text-muted-foreground text-xs">any</span>
                                 )}
                               </TableCell>
                               <TableCell 
                                 className="text-sm"
                                 onClick={() => setSelectedRule(rule)}
                               >
-                                {rule.services.length > 0 ? (
+                                {rule.services && rule.services.length > 0 ? (
                                   <div className="space-y-1">
                                     {rule.services.slice(0, 2).map((svc, idx) => (
                                       <Badge key={idx} variant="outline" className="mr-1 mb-1 text-xs">
-                                        {svc}
+                                        {svc || 'any'}
                                       </Badge>
                                     ))}
                                     {rule.services.length > 2 && (
@@ -909,15 +918,15 @@ export const DataPanel = ({
                                     )}
                                   </div>
                                 ) : (
-                                  <span className="text-muted-foreground">any</span>
+                                  <span className="text-muted-foreground text-xs">any</span>
                                 )}
                               </TableCell>
                               <TableCell onClick={() => setSelectedRule(rule)}>
                                 <Badge 
-                                  variant={rule.action === 'permit' ? 'default' : 'destructive'}
+                                  variant={rule.action === 'deny' ? 'destructive' : 'default'}
                                   className="font-semibold"
                                 >
-                                  {rule.action}
+                                  {rule.action || 'unknown'}
                                 </Badge>
                               </TableCell>
                               <TableCell onClick={() => setSelectedRule(rule)}>
@@ -936,13 +945,15 @@ export const DataPanel = ({
                                 </div>
                               </TableCell>
                               <TableCell onClick={() => setSelectedRule(rule)}>
-                                {rule.logging && rule.logging !== 'default' ? (
+                                {rule.logging && rule.logging !== 'default' && rule.logging !== 'none' ? (
                                   <div className="flex items-center gap-1">
                                     <FileWarning className="h-4 w-4 text-amber-600" />
                                     <span className="text-xs">{rule.logging}</span>
                                   </div>
                                 ) : (
-                                  <span className="text-xs text-muted-foreground">Standard</span>
+                                  <span className="text-xs text-muted-foreground">
+                                    {rule.logging === 'none' ? 'Aus' : 'Standard'}
+                                  </span>
                                 )}
                               </TableCell>
                             </TableRow>
