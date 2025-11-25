@@ -35,6 +35,8 @@ const generateReqId = () => Math.random().toString(16).slice(2, 10);
 
 export class CSMClient {
   private session: CSMSession | null = null;
+  private objectCache: Map<string, { data: string; timestamp: number }> = new Map();
+  private readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes cache TTL
 
   async login({ ipAddress, username, password, verifyTls }: CSMLoginRequest): Promise<boolean> {
     console.log('🔐 CSM Login via proxy', { 
@@ -124,6 +126,15 @@ export class CSMClient {
   async getPolicyObjectsList({ policyObjectType, limit, offset }: CSMObjectQuery) {
     if (!this.session) throw new Error('Nicht mit CSM verbunden');
 
+    // Check cache first
+    const cacheKey = `policyObjects_${policyObjectType}`;
+    const cached = this.objectCache.get(cacheKey);
+    
+    if (cached && (Date.now() - cached.timestamp) < this.CACHE_TTL_MS) {
+      console.log(`💾 Using cached ${policyObjectType} objects (age: ${Math.floor((Date.now() - cached.timestamp) / 1000)}s)`);
+      return cached.data;
+    }
+
     // CSM API supports pagination with limit=1000 per request
     // We'll fetch in batches until no more objects are returned
     const batchSize = 1000;
@@ -203,11 +214,27 @@ export class CSMClient {
     const mergedXml = serializer.serializeToString(mergedDoc);
     console.log(`  → Merged XML size: ${mergedXml.length} bytes`);
     
+    // Cache the result
+    this.objectCache.set(cacheKey, {
+      data: mergedXml,
+      timestamp: Date.now()
+    });
+    console.log(`💾 Cached ${policyObjectType} objects for ${this.CACHE_TTL_MS / 1000}s`);
+    
     return mergedXml;
   }
 
   async getDeviceList() {
     if (!this.session) throw new Error('Nicht mit CSM verbunden');
+
+    // Check cache first
+    const cacheKey = 'deviceList';
+    const cached = this.objectCache.get(cacheKey);
+    
+    if (cached && (Date.now() - cached.timestamp) < this.CACHE_TTL_MS) {
+      console.log(`💾 Using cached device list (age: ${Math.floor((Date.now() - cached.timestamp) / 1000)}s)`);
+      return cached.data;
+    }
 
     // API Spec v2.4: getDeviceList Request Format
     const requestXml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -217,7 +244,16 @@ export class CSMClient {
 </csm:deviceListRequest>`;
 
     console.log('📱 Fetching device list from CSM...');
-    return this.request('/configservice/getDeviceList', requestXml);
+    const xmlData = await this.request('/configservice/getDeviceList', requestXml);
+    
+    // Cache the result
+    this.objectCache.set(cacheKey, {
+      data: xmlData,
+      timestamp: Date.now()
+    });
+    console.log(`💾 Cached device list for ${this.CACHE_TTL_MS / 1000}s`);
+    
+    return xmlData;
   }
 
   private async request(endpoint: string, body: string) {
@@ -358,6 +394,11 @@ export class CSMClient {
     return this.request('/utilservice', requestXml);
   }
 
+  clearCache() {
+    console.log('🗑️ Clearing object cache...');
+    this.objectCache.clear();
+  }
+
   async logout() {
     if (!this.session) return;
     
@@ -390,6 +431,7 @@ export class CSMClient {
       console.warn('⚠️ Logout-Fehler (ignoriert):', error);
     } finally {
       this.session = null;
+      this.clearCache(); // Clear cache on logout
     }
   }
 }
