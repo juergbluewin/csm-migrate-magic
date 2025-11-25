@@ -550,23 +550,37 @@ export const DataPanel = ({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {networkObjects.map((obj) => (
-                    <TableRow key={obj.id}>
-                      <TableCell className="font-medium">{obj.name}</TableCell>
-                      <TableCell><Badge>{obj.type}</Badge></TableCell>
-                      <TableCell className="font-mono text-sm">
-                        {obj.type === 'host' && obj.ipAddress}
-                        {obj.type === 'network' && obj.ipAddress}
-                        {obj.type === 'range' && obj.startIp}
-                        {!obj.ipAddress && !obj.startIp && obj.value}
+                  {networkObjects.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                        Keine Network Objects geladen. Klicken Sie auf "Daten laden" um Objekte vom CSM abzurufen.
                       </TableCell>
-                      <TableCell className="font-mono text-sm">
-                        {obj.type === 'network' && obj.netmask}
-                        {obj.type === 'range' && obj.endIp && `bis ${obj.endIp}`}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">{obj.description}</TableCell>
                     </TableRow>
-                  ))}
+                  ) : (
+                    networkObjects.map((obj) => (
+                      <TableRow key={obj.id}>
+                        <TableCell className="font-medium">{obj.name}</TableCell>
+                        <TableCell>
+                          <Badge variant={obj.type === 'host' ? 'default' : 'secondary'}>
+                            {obj.type}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">
+                          {obj.type === 'host' && (obj.ipAddress || obj.value || '-')}
+                          {obj.type === 'network' && (obj.ipAddress || obj.value?.split('/')[0] || obj.value?.split(' ')[0] || '-')}
+                          {obj.type === 'range' && (obj.startIp || obj.value?.split('-')[0] || '-')}
+                          {obj.type === 'group' && (obj.value || '-')}
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">
+                          {obj.type === 'network' && (obj.netmask || obj.value?.split('/')[1] || obj.value?.split(' ')[1] || '-')}
+                          {obj.type === 'range' && obj.endIp ? `bis ${obj.endIp}` : obj.type === 'range' && obj.value?.includes('-') ? `bis ${obj.value.split('-')[1]}` : obj.type === 'range' ? '-' : ''}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground max-w-xs truncate">
+                          {obj.description || '-'}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
                 </TableBody>
               </Table>
             </CardContent>

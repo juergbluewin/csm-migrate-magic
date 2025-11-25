@@ -445,38 +445,80 @@ export class CSMXMLParser {
     const doc = parser.parseFromString(xmlData, 'text/xml');
     
     const networkObjects = doc.querySelectorAll('networkPolicyObject');
+    console.log(`📦 Parsing ${networkObjects.length} network objects from XML...`);
+    
     networkObjects.forEach((obj, index) => {
-      const name = obj.querySelector('name')?.textContent || `object-${index}`;
-      const kind = obj.querySelector('kind')?.textContent || 'host';
-      const value = obj.querySelector('value')?.textContent || '';
-      const description = obj.querySelector('description')?.textContent || '';
+      const name = obj.querySelector('name')?.textContent?.trim() || `object-${index}`;
+      const kind = obj.querySelector('kind')?.textContent?.trim() || 'host';
+      const description = obj.querySelector('description')?.textContent?.trim() || '';
       
-      // Parse IP details from value
+      // Parse IP details - CSM can store data in multiple formats
       let ipAddress = '';
       let netmask = '';
       let startIp = '';
       let endIp = '';
+      let value = '';
+      
+      // Try multiple XML element names for the value
+      const valueElement = obj.querySelector('value') || 
+                          obj.querySelector('ipAddress') || 
+                          obj.querySelector('ip') ||
+                          obj.querySelector('address');
+      value = valueElement?.textContent?.trim() || '';
+      
+      // Try dedicated elements for structured data
+      const ipv4Element = obj.querySelector('ipv4Address, ipv4Data, ipv4');
+      const maskElement = obj.querySelector('netmask, mask, subnetMask');
+      const startIpElement = obj.querySelector('startIp, startAddress, rangeStart');
+      const endIpElement = obj.querySelector('endIp, endAddress, rangeEnd');
       
       if (kind === 'host') {
-        ipAddress = value;
-      } else if (kind === 'subnet') {
-        // Format: "192.168.1.0/24" or "192.168.1.0 255.255.255.0"
-        if (value.includes('/')) {
+        ipAddress = ipv4Element?.textContent?.trim() || value;
+      } else if (kind === 'subnet' || kind === 'network') {
+        // Try structured elements first
+        if (ipv4Element) {
+          ipAddress = ipv4Element.textContent?.trim() || '';
+        } else if (value.includes('/')) {
+          // CIDR format: "192.168.1.0/24"
           const parts = value.split('/');
-          ipAddress = parts[0];
-          netmask = parts[1]; // CIDR notation
+          ipAddress = parts[0].trim();
+          netmask = parts[1].trim(); // CIDR notation
         } else if (value.includes(' ')) {
-          const parts = value.split(' ');
+          // Space-separated: "192.168.1.0 255.255.255.0"
+          const parts = value.split(' ').filter(p => p);
           ipAddress = parts[0];
-          netmask = parts[1]; // Subnet mask
+          netmask = parts[1] || '';
+        } else {
+          ipAddress = value;
+        }
+        
+        // Override with explicit mask element if present
+        if (maskElement) {
+          netmask = maskElement.textContent?.trim() || netmask;
         }
       } else if (kind === 'range') {
-        // Format: "192.168.1.1-192.168.1.254"
-        if (value.includes('-')) {
+        // Try structured elements first
+        if (startIpElement && endIpElement) {
+          startIp = startIpElement.textContent?.trim() || '';
+          endIp = endIpElement.textContent?.trim() || '';
+        } else if (value.includes('-')) {
+          // Dash format: "192.168.1.1-192.168.1.254"
           const parts = value.split('-');
+          startIp = parts[0].trim();
+          endIp = parts[1]?.trim() || '';
+        } else if (value.includes(' ')) {
+          // Space-separated range: "192.168.1.1 192.168.1.254"
+          const parts = value.split(' ').filter(p => p);
           startIp = parts[0];
-          endIp = parts[1];
+          endIp = parts[1] || '';
         }
+      }
+      
+      // Log parsing details for first 3 objects to help debugging
+      if (index < 3) {
+        console.log(`  → Object ${index + 1}: ${name} (${kind})`);
+        console.log(`     IP: ${ipAddress}, Mask: ${netmask}, Range: ${startIp}-${endIp}`);
+        console.log(`     Description: ${description.substring(0, 50)}${description.length > 50 ? '...' : ''}`);
       }
       
       objects.push({
@@ -491,6 +533,7 @@ export class CSMXMLParser {
       });
     });
     
+    console.log(`✅ Parsed ${objects.length} network objects`);
     return objects;
   }
 
