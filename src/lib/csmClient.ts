@@ -124,17 +124,86 @@ export class CSMClient {
   async getPolicyObjectsList({ policyObjectType, limit, offset }: CSMObjectQuery) {
     if (!this.session) throw new Error('Nicht mit CSM verbunden');
 
-    // API Spec v2.4, Table 108: getPolicyObjectsListByType Request Format
-    // CSM API returns ALL objects when no limit/offset specified
-    const requestXml = `<?xml version="1.0" encoding="UTF-8"?>
+    // CSM API supports pagination with limit=1000 per request
+    // We'll fetch in batches until no more objects are returned
+    const batchSize = 1000;
+    let currentOffset = 0;
+    let allXmlResponses: string[] = [];
+    let totalObjectsLoaded = 0;
+
+    console.log(`📦 Fetching ${policyObjectType} objects from CSM with pagination (batch size: ${batchSize})...`);
+
+    while (true) {
+      const requestXml = `<?xml version="1.0" encoding="UTF-8"?>
 <csm:policyObjectsListByTypeRequest xmlns:csm="csm">
   <protVersion>1.0</protVersion>
   <reqId>${generateReqId()}</reqId>
   <policyObjectType>${policyObjectType}</policyObjectType>
+  <limit>${batchSize}</limit>
+  <offset>${currentOffset}</offset>
 </csm:policyObjectsListByTypeRequest>`;
 
-    console.log(`📦 Fetching ALL ${policyObjectType} objects from CSM (requesting unlimited objects)`);
-    return this.request('/configservice/getPolicyObjectsListByType', requestXml);
+      console.log(`  → Batch ${Math.floor(currentOffset / batchSize) + 1}: offset=${currentOffset}, limit=${batchSize}`);
+      const xmlData = await this.request('/configservice/getPolicyObjectsListByType', requestXml);
+      
+      // Parse to count objects in this batch
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(xmlData, 'text/xml');
+      const objectElements = doc.querySelectorAll(
+        policyObjectType === 'NetworkPolicyObject' ? 'networkPolicyObject' : 'servicePolicyObject'
+      );
+      const objectCount = objectElements.length;
+      
+      console.log(`  → Received ${objectCount} objects in this batch`);
+      totalObjectsLoaded += objectCount;
+      
+      if (objectCount > 0) {
+        allXmlResponses.push(xmlData);
+      }
+      
+      // Stop if we received fewer objects than the batch size (reached the end)
+      if (objectCount < batchSize) {
+        console.log(`✅ Pagination complete: ${totalObjectsLoaded} total ${policyObjectType} objects loaded`);
+        break;
+      }
+      
+      currentOffset += batchSize;
+    }
+
+    // Merge all XML responses into a single response
+    if (allXmlResponses.length === 0) {
+      console.log(`  → No objects found`);
+      return '<?xml version="1.0" encoding="UTF-8"?><csm:response xmlns:csm="csm"></csm:response>';
+    }
+
+    if (allXmlResponses.length === 1) {
+      return allXmlResponses[0];
+    }
+
+    // Merge multiple XML responses by extracting all object elements
+    console.log(`  → Merging ${allXmlResponses.length} XML responses...`);
+    const parser = new DOMParser();
+    const mergedDoc = parser.parseFromString(allXmlResponses[0], 'text/xml');
+    const rootElement = mergedDoc.documentElement;
+
+    // Extract and append all object elements from subsequent responses
+    for (let i = 1; i < allXmlResponses.length; i++) {
+      const doc = parser.parseFromString(allXmlResponses[i], 'text/xml');
+      const objectElements = doc.querySelectorAll(
+        policyObjectType === 'NetworkPolicyObject' ? 'networkPolicyObject' : 'servicePolicyObject'
+      );
+      
+      objectElements.forEach(element => {
+        const importedNode = mergedDoc.importNode(element, true);
+        rootElement.appendChild(importedNode);
+      });
+    }
+
+    const serializer = new XMLSerializer();
+    const mergedXml = serializer.serializeToString(mergedDoc);
+    console.log(`  → Merged XML size: ${mergedXml.length} bytes`);
+    
+    return mergedXml;
   }
 
   async getDeviceList() {
