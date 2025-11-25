@@ -430,8 +430,8 @@ export class CSMXMLParser {
     const parser = new DOMParser();
     const doc = parser.parseFromString(xmlData, 'text/xml');
     
-    // CSM liefert deviceAccessRuleFirewallPolicy statt accessRule
-    const accessPolicies = doc.querySelectorAll('deviceAccessRuleFirewallPolicy');
+    // CSM liefert deviceAccessRuleFirewallPolicy oder deviceAccessRuleUnifiedFirewallPolicy
+    const accessPolicies = doc.querySelectorAll('deviceAccessRuleFirewallPolicy, deviceAccessRuleUnifiedFirewallPolicy');
     
     accessPolicies.forEach((policy, index) => {
       const name =
