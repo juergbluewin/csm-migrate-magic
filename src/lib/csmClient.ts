@@ -125,8 +125,7 @@ export class CSMClient {
     if (!this.session) throw new Error('Nicht mit CSM verbunden');
 
     // API Spec v2.4, Table 108: getPolicyObjectsListByType Request Format
-    // Note: limit and offset parameters are NOT supported by CSM API according to XSD schema
-    // Pagination must be handled client-side if needed
+    // CSM API returns ALL objects when no limit/offset specified
     const requestXml = `<?xml version="1.0" encoding="UTF-8"?>
 <csm:policyObjectsListByTypeRequest xmlns:csm="csm">
   <protVersion>1.0</protVersion>
@@ -134,8 +133,22 @@ export class CSMClient {
   <policyObjectType>${policyObjectType}</policyObjectType>
 </csm:policyObjectsListByTypeRequest>`;
 
-    console.log(`📦 Fetching ALL ${policyObjectType} objects from CSM (no pagination support)`);
+    console.log(`📦 Fetching ALL ${policyObjectType} objects from CSM (requesting unlimited objects)`);
     return this.request('/configservice/getPolicyObjectsListByType', requestXml);
+  }
+
+  async getDeviceList() {
+    if (!this.session) throw new Error('Nicht mit CSM verbunden');
+
+    // API Spec v2.4: getDeviceList Request Format
+    const requestXml = `<?xml version="1.0" encoding="UTF-8"?>
+<csm:deviceListRequest xmlns:csm="csm">
+  <protVersion>1.0</protVersion>
+  <reqId>${generateReqId()}</reqId>
+</csm:deviceListRequest>`;
+
+    console.log('📱 Fetching device list from CSM...');
+    return this.request('/configservice/getDeviceList', requestXml);
   }
 
   private async request(endpoint: string, body: string) {
