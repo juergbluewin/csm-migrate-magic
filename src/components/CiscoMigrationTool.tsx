@@ -83,6 +83,14 @@ export interface AccessRule {
   description?: string;
 }
 
+export interface Device {
+  id: string;
+  name: string;
+  ipAddress: string;
+  deviceType: string;
+  gid?: string;
+}
+
 export interface ExportSelection {
   networkObjects: boolean;
   serviceObjects: boolean;
@@ -92,6 +100,7 @@ export interface ExportSelection {
   deviceGid?: string;
   deviceIp?: string;
   cliCommand?: string;
+  selectedFirewall?: string; // Firewall name/ID
 }
 
 export interface ExportSchema {
@@ -128,6 +137,7 @@ const CiscoMigrationTool = () => {
   const [networkObjects, setNetworkObjects] = useState<NetworkObject[]>([]);
   const [serviceObjects, setServiceObjects] = useState<ServiceObject[]>([]);
   const [accessLists, setAccessLists] = useState<AccessList[]>([]);
+  const [devices, setDevices] = useState<Device[]>([]);
   const [exportSelection, setExportSelection] = useState<ExportSelection>({
     networkObjects: true,
     serviceObjects: true,
@@ -136,7 +146,8 @@ const CiscoMigrationTool = () => {
     policyName: '',
     deviceGid: '',
     deviceIp: '',
-    cliCommand: 'show access-list'
+    cliCommand: 'show access-list',
+    selectedFirewall: ''
   });
 
   const addLog = (level: LogEntry['level'], message: string, details?: string) => {
@@ -158,6 +169,7 @@ const CiscoMigrationTool = () => {
     setNetworkObjects([]);
     setServiceObjects([]);
     setAccessLists([]);
+    setDevices([]);
     setExportSelection({
       networkObjects: true,
       serviceObjects: true,
@@ -166,7 +178,8 @@ const CiscoMigrationTool = () => {
       policyName: '',
       deviceGid: '',
       deviceIp: '',
-      cliCommand: 'show access-list'
+      cliCommand: 'show access-list',
+      selectedFirewall: ''
     });
     addLog('info', 'Tool wurde zurückgesetzt', 'Alle Daten und Verbindungen wurden gelöscht.');
   };
@@ -292,6 +305,9 @@ const CiscoMigrationTool = () => {
               exportSelection={exportSelection}
               onSelectionChange={setExportSelection}
               connectionStatus={connectionStatus}
+              devices={devices}
+              onDevicesChange={setDevices}
+              csmConnection={csmConnection}
               addLog={addLog}
             />
           </TabsContent>

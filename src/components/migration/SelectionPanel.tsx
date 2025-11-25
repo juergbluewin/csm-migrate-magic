@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,14 +9,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { AlertCircle, Database, Server, List, Terminal } from "lucide-react";
+import { AlertCircle, Database, Server, List, Terminal, RefreshCw, Shield } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { ConnectionStatus, ExportSelection, LogEntry } from "../CiscoMigrationTool";
+import { ConnectionStatus, ExportSelection, LogEntry, Device, CSMConnection } from "../CiscoMigrationTool";
 
 interface SelectionPanelProps {
   exportSelection: ExportSelection;
   onSelectionChange: (selection: ExportSelection) => void;
   connectionStatus: ConnectionStatus;
+  devices: Device[];
+  onDevicesChange: (devices: Device[]) => void;
+  csmConnection: CSMConnection;
   addLog: (level: LogEntry['level'], message: string, details?: string) => void;
 }
 
@@ -23,13 +27,77 @@ export const SelectionPanel = ({
   exportSelection, 
   onSelectionChange, 
   connectionStatus,
+  devices,
+  onDevicesChange,
+  csmConnection,
   addLog 
 }: SelectionPanelProps) => {
+  const [loadingDevices, setLoadingDevices] = useState(false);
+
   const updateSelection = (updates: Partial<ExportSelection>) => {
     const newSelection = { ...exportSelection, ...updates };
     onSelectionChange(newSelection);
     addLog('info', 'Export-Auswahl aktualisiert', JSON.stringify(updates, null, 2));
   };
+
+  const loadDevices = async () => {
+    if (connectionStatus.csm !== 'connected') {
+      addLog('warning', 'Firewall-Liste', 'Bitte stellen Sie zuerst eine Verbindung zum CSM her');
+      return;
+    }
+
+    setLoadingDevices(true);
+    addLog('info', 'Firewall-Liste', 'Lade verfügbare Firewalls...');
+
+    try {
+      const { CSMClient } = await import('@/lib/csmClient');
+      const client = new CSMClient();
+      
+      // Use existing session
+      await client.login(csmConnection);
+      
+      const xmlData = await client.getDeviceList();
+      
+      // Parse device list from XML
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(xmlData, 'text/xml');
+      
+      const deviceElements = xmlDoc.getElementsByTagName('device');
+      const deviceList: Device[] = [];
+      
+      for (let i = 0; i < deviceElements.length; i++) {
+        const device = deviceElements[i];
+        const name = device.getElementsByTagName('name')[0]?.textContent || '';
+        const ipAddress = device.getElementsByTagName('ipAddress')[0]?.textContent || '';
+        const deviceType = device.getElementsByTagName('deviceType')[0]?.textContent || '';
+        const gid = device.getElementsByTagName('gid')[0]?.textContent || '';
+        
+        if (name && ipAddress) {
+          deviceList.push({
+            id: gid || `device-${i}`,
+            name,
+            ipAddress,
+            deviceType,
+            gid
+          });
+        }
+      }
+      
+      onDevicesChange(deviceList);
+      addLog('success', 'Firewall-Liste', `${deviceList.length} Firewalls gefunden`);
+    } catch (error: any) {
+      addLog('error', 'Firewall-Liste', `Fehler beim Laden: ${error.message}`);
+    } finally {
+      setLoadingDevices(false);
+    }
+  };
+
+  // Auto-load devices when CSM connection is established
+  useEffect(() => {
+    if (connectionStatus.csm === 'connected' && devices.length === 0) {
+      loadDevices();
+    }
+  }, [connectionStatus.csm]);
 
   const cliCommands = [
     { value: 'show access-list', label: 'show access-list (ASA/PIX)' },
@@ -50,6 +118,93 @@ export const SelectionPanel = ({
             Bitte stellen Sie zuerst eine Verbindung zum CSM her, um die Export-Optionen zu konfigurieren.
           </AlertDescription>
         </Alert>
+      )}
+
+      {/* Firewall Auswahl */}
+      {isConnected && (
+        <Card className="mb-6">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Shield className="h-5 w-5 text-primary" />
+                  Firewall Auswahl
+                </CardTitle>
+                <CardDescription>
+                  Wählen Sie die Firewall aus, von der die Access-Listen exportiert werden sollen
+                </CardDescription>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={loadDevices}
+                disabled={loadingDevices}
+              >
+                {loadingDevices ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                    Lädt...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Aktualisieren
+                  </>
+                )}
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="firewallSelect">Firewall</Label>
+                <Select
+                  value={exportSelection.selectedFirewall}
+                  onValueChange={(value) => {
+                    const selectedDevice = devices.find(d => d.id === value);
+                    updateSelection({ 
+                      selectedFirewall: value,
+                      deviceGid: selectedDevice?.gid,
+                      deviceIp: selectedDevice?.ipAddress
+                    });
+                  }}
+                >
+                  <SelectTrigger id="firewallSelect">
+                    <SelectValue placeholder={devices.length > 0 ? "Firewall auswählen..." : "Keine Firewalls geladen"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {devices.map((device) => (
+                      <SelectItem key={device.id} value={device.id}>
+                        {device.name} ({device.ipAddress})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {devices.length === 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    Klicken Sie auf "Aktualisieren" um Firewalls zu laden
+                  </p>
+                )}
+                {exportSelection.selectedFirewall && (
+                  <div className="mt-2 p-3 bg-muted rounded-md">
+                    <p className="text-sm font-medium">Ausgewählte Firewall:</p>
+                    <p className="text-sm text-muted-foreground">
+                      {devices.find(d => d.id === exportSelection.selectedFirewall)?.name}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      IP: {devices.find(d => d.id === exportSelection.selectedFirewall)?.ipAddress}
+                    </p>
+                    {devices.find(d => d.id === exportSelection.selectedFirewall)?.gid && (
+                      <p className="text-xs text-muted-foreground">
+                        GID: {devices.find(d => d.id === exportSelection.selectedFirewall)?.gid}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       <div className="grid gap-6 md:grid-cols-2">
