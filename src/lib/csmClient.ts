@@ -544,37 +544,106 @@ export class CSMXMLParser {
     const doc = parser.parseFromString(xmlData, 'text/xml');
     
     const serviceObjects = doc.querySelectorAll('servicePolicyObject');
+    console.log(`📦 Parsing ${serviceObjects.length} service objects from XML...`);
+    
     serviceObjects.forEach((obj, index) => {
-      const name = obj.querySelector('name')?.textContent || `service-${index}`;
-      const protocol = obj.querySelector('protocol')?.textContent || 'tcp';
-      const ports = obj.querySelector('ports')?.textContent || '';
-      const description = obj.querySelector('description')?.textContent || '';
+      const name = obj.querySelector('name')?.textContent?.trim() || `service-${index}`;
+      const description = obj.querySelector('description')?.textContent?.trim() || '';
       
-      // Parse port details
+      // Parse protocol - try multiple element names
+      const protocolElement = obj.querySelector('protocol') || 
+                             obj.querySelector('protocolType') ||
+                             obj.querySelector('type');
+      let protocol = protocolElement?.textContent?.trim()?.toLowerCase() || 'tcp';
+      
+      // Normalize protocol names
+      if (protocol === '6') protocol = 'tcp';
+      if (protocol === '17') protocol = 'udp';
+      if (protocol === '1') protocol = 'icmp';
+      
+      // Parse port details - CSM can store in multiple formats
       let sourcePort = '';
       let destPort = '';
+      let ports = '';
       
-      // Format can be: "80", "1024-65535", "any", "eq 80", "range 1024 65535"
-      if (ports.includes('-') && !ports.includes('range')) {
-        destPort = ports; // Range like "1024-65535"
-      } else if (ports.startsWith('eq ')) {
-        destPort = ports.replace('eq ', ''); // Single port
-      } else if (ports.startsWith('range ')) {
-        destPort = ports.replace('range ', '').replace(' ', '-'); // Convert to "1024-65535"
-      } else {
-        destPort = ports;
+      // Try multiple port element names
+      const portElement = obj.querySelector('ports') || 
+                         obj.querySelector('port') ||
+                         obj.querySelector('destinationPort') ||
+                         obj.querySelector('destPort');
+      ports = portElement?.textContent?.trim() || '';
+      
+      const srcPortElement = obj.querySelector('sourcePort') || 
+                            obj.querySelector('srcPort') ||
+                            obj.querySelector('sourcePortRange');
+      sourcePort = srcPortElement?.textContent?.trim() || '';
+      
+      // Try structured port data (Cisco uses nested elements)
+      const portDataElement = obj.querySelector('portData');
+      if (portDataElement) {
+        const destPortData = portDataElement.querySelector('destinationPort, destPort');
+        const srcPortData = portDataElement.querySelector('sourcePort, srcPort');
+        
+        if (destPortData) ports = destPortData.textContent?.trim() || ports;
+        if (srcPortData) sourcePort = srcPortData.textContent?.trim() || sourcePort;
+      }
+      
+      // Parse and normalize port format
+      // Formats: "80", "1024-65535", "any", "eq 80", "range 1024 65535", "lt 1024", "gt 1024"
+      if (ports) {
+        if (ports.toLowerCase() === 'any') {
+          destPort = 'any';
+        } else if (ports.startsWith('eq ')) {
+          destPort = ports.replace('eq ', '').trim();
+        } else if (ports.startsWith('range ')) {
+          // "range 1024 65535" → "1024-65535"
+          const rangeParts = ports.replace('range ', '').trim().split(/\s+/);
+          destPort = rangeParts.join('-');
+        } else if (ports.startsWith('lt ')) {
+          destPort = `<${ports.replace('lt ', '').trim()}`;
+        } else if (ports.startsWith('gt ')) {
+          destPort = `>${ports.replace('gt ', '').trim()}`;
+        } else if (ports.includes('-')) {
+          destPort = ports; // Already in range format
+        } else {
+          destPort = ports; // Single port number
+        }
+      }
+      
+      // Process source port similarly
+      if (sourcePort) {
+        if (sourcePort.toLowerCase() === 'any') {
+          sourcePort = 'any';
+        } else if (sourcePort.startsWith('eq ')) {
+          sourcePort = sourcePort.replace('eq ', '').trim();
+        } else if (sourcePort.startsWith('range ')) {
+          const rangeParts = sourcePort.replace('range ', '').trim().split(/\s+/);
+          sourcePort = rangeParts.join('-');
+        } else if (sourcePort.startsWith('lt ')) {
+          sourcePort = `<${sourcePort.replace('lt ', '').trim()}`;
+        } else if (sourcePort.startsWith('gt ')) {
+          sourcePort = `>${sourcePort.replace('gt ', '').trim()}`;
+        }
+      }
+      
+      // Log parsing details for first 3 objects to help debugging
+      if (index < 3) {
+        console.log(`  → Service ${index + 1}: ${name} (${protocol})`);
+        console.log(`     Source Port: ${sourcePort || 'any'}, Dest Port: ${destPort || ports || 'any'}`);
+        console.log(`     Description: ${description.substring(0, 50)}${description.length > 50 ? '...' : ''}`);
       }
       
       objects.push({
         name,
         protocol,
         ports,
-        sourcePort,
-        destPort,
+        sourcePort: sourcePort || 'any',
+        destPort: destPort || ports || 'any',
         description
       });
     });
     
+    console.log(`✅ Parsed ${objects.length} service objects`);
     return objects;
   }
 

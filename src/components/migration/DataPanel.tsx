@@ -605,15 +605,33 @@ export const DataPanel = ({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {serviceObjects.map((svc) => (
-                    <TableRow key={svc.id}>
-                      <TableCell className="font-medium">{svc.name}</TableCell>
-                      <TableCell><Badge>{svc.protocol.toUpperCase()}</Badge></TableCell>
-                      <TableCell className="font-mono text-sm">{svc.sourcePort || 'any'}</TableCell>
-                      <TableCell className="font-mono text-sm">{svc.destPort || svc.ports}</TableCell>
-                      <TableCell className="text-muted-foreground">{svc.description}</TableCell>
+                  {serviceObjects.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                        Keine Service Objects geladen. Klicken Sie auf "Daten laden" um Objekte vom CSM abzurufen.
+                      </TableCell>
                     </TableRow>
-                  ))}
+                  ) : (
+                    serviceObjects.map((svc) => (
+                      <TableRow key={svc.id}>
+                        <TableCell className="font-medium">{svc.name}</TableCell>
+                        <TableCell>
+                          <Badge variant={svc.protocol === 'tcp' ? 'default' : 'secondary'}>
+                            {svc.protocol.toUpperCase()}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">
+                          {svc.sourcePort || 'any'}
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">
+                          {svc.destPort || svc.ports || 'any'}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground max-w-xs truncate">
+                          {svc.description || '-'}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
                 </TableBody>
               </Table>
             </CardContent>
