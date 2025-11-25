@@ -48,6 +48,7 @@ export const DataPanel = ({
   const [isObjectDialogOpen, setIsObjectDialogOpen] = useState(false);
   const [isServiceDialogOpen, setIsServiceDialogOpen] = useState(false);
   const [isAccessListDialogOpen, setIsAccessListDialogOpen] = useState(false);
+  const [isRuleDialogOpen, setIsRuleDialogOpen] = useState(false);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -460,6 +461,72 @@ export const DataPanel = ({
     addLog('success', 'Export erfolgreich', `${selectedData.length} Regeln exportiert`);
   };
 
+  const handleEditNetworkObject = (obj: NetworkObject) => {
+    setSelectedObject(obj);
+    setIsObjectDialogOpen(true);
+  };
+
+  const handleSaveNetworkObject = (updatedObject: NetworkObject) => {
+    const updated = networkObjects.map(obj => 
+      obj.id === updatedObject.id ? updatedObject : obj
+    );
+    onNetworkObjectsChange(updated);
+    setIsObjectDialogOpen(false);
+    addLog('info', 'Network Object aktualisiert', `${updatedObject.name} wurde erfolgreich geändert`);
+  };
+
+  const handleDeleteNetworkObject = (id: string) => {
+    const updated = networkObjects.filter(obj => obj.id !== id);
+    onNetworkObjectsChange(updated);
+    addLog('warning', 'Network Object gelöscht', 'Objekt wurde aus der Liste entfernt');
+  };
+
+  const handleEditServiceObject = (svc: ServiceObject) => {
+    setSelectedService(svc);
+    setIsServiceDialogOpen(true);
+  };
+
+  const handleSaveServiceObject = (updatedService: ServiceObject) => {
+    const updated = serviceObjects.map(svc => 
+      svc.id === updatedService.id ? updatedService : svc
+    );
+    onServiceObjectsChange(updated);
+    setIsServiceDialogOpen(false);
+    addLog('info', 'Service Object aktualisiert', `${updatedService.name} wurde erfolgreich geändert`);
+  };
+
+  const handleDeleteServiceObject = (id: string) => {
+    const updated = serviceObjects.filter(svc => svc.id !== id);
+    onServiceObjectsChange(updated);
+    addLog('warning', 'Service Object gelöscht', 'Objekt wurde aus der Liste entfernt');
+  };
+
+  const handleEditRule = (rule: AccessRule) => {
+    setSelectedRule(rule);
+    setIsRuleDialogOpen(true);
+  };
+
+  const handleSaveRule = (updatedRule: AccessRule) => {
+    const updated = accessLists.map(list => ({
+      ...list,
+      rules: list.rules.map(rule => 
+        rule.id === updatedRule.id ? updatedRule : rule
+      )
+    }));
+    onAccessListsChange(updated);
+    setIsRuleDialogOpen(false);
+    addLog('info', 'Access Rule aktualisiert', `${updatedRule.name} wurde erfolgreich geändert`);
+  };
+
+  const handleDeleteRule = (ruleId: string) => {
+    const updated = accessLists.map(list => ({
+      ...list,
+      rules: list.rules.filter(rule => rule.id !== ruleId)
+    }));
+    onAccessListsChange(updated);
+    addLog('warning', 'Access Rule gelöscht', 'Regel wurde aus der Liste entfernt');
+  };
+
 
   return (
     <div className="space-y-6">
@@ -562,6 +629,7 @@ export const DataPanel = ({
                     <TableHead>IP-Adresse</TableHead>
                     <TableHead>Subnetzmaske/Bereich</TableHead>
                     <TableHead>Beschreibung</TableHead>
+                    <TableHead className="w-24">Aktionen</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -593,6 +661,18 @@ export const DataPanel = ({
                         <TableCell className="text-muted-foreground max-w-xs truncate">
                           {obj.description || '-'}
                         </TableCell>
+                        <TableCell>
+                          <div className="flex gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleEditNetworkObject(obj)}
+                              className="h-8 w-8 p-0"
+                            >
+                              <Settings className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
                       </TableRow>
                     ))
                   )}
@@ -617,6 +697,7 @@ export const DataPanel = ({
                     <TableHead>Source Port</TableHead>
                     <TableHead>Destination Port</TableHead>
                     <TableHead>Beschreibung</TableHead>
+                    <TableHead className="w-24">Aktionen</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -643,6 +724,18 @@ export const DataPanel = ({
                         </TableCell>
                         <TableCell className="text-muted-foreground max-w-xs truncate">
                           {svc.description || '-'}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleEditServiceObject(svc)}
+                              className="h-8 w-8 p-0"
+                            >
+                              <Settings className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))
@@ -882,6 +975,7 @@ export const DataPanel = ({
                             <TableHead className="w-24">Aktion</TableHead>
                             <TableHead className="w-24">Status</TableHead>
                             <TableHead>Logging</TableHead>
+                            <TableHead className="w-20">Aktionen</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -1006,6 +1100,19 @@ export const DataPanel = ({
                                     {rule.logging === 'none' ? 'Aus' : 'Standard'}
                                   </span>
                                 )}
+                              </TableCell>
+                              <TableCell>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleEditRule(rule);
+                                  }}
+                                  className="h-8 w-8 p-0"
+                                >
+                                  <Settings className="h-4 w-4" />
+                                </Button>
                               </TableCell>
                             </TableRow>
                           ))}
@@ -1150,6 +1257,339 @@ export const DataPanel = ({
                   <p className="text-sm text-muted-foreground">{selectedRule.description}</p>
                 </div>
               )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Network Object Edit Dialog */}
+      <Dialog open={isObjectDialogOpen} onOpenChange={setIsObjectDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Network Object bearbeiten</DialogTitle>
+            <DialogDescription>
+              Passen Sie die Eigenschaften des Network Objects an
+            </DialogDescription>
+          </DialogHeader>
+          
+          {selectedObject && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="net-name">Name</Label>
+                <Input
+                  id="net-name"
+                  value={selectedObject.name}
+                  onChange={(e) => setSelectedObject({ ...selectedObject, name: e.target.value })}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="net-type">Typ</Label>
+                <Select 
+                  value={selectedObject.type} 
+                  onValueChange={(value: any) => setSelectedObject({ ...selectedObject, type: value })}
+                >
+                  <SelectTrigger id="net-type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-background z-50">
+                    <SelectItem value="host">Host</SelectItem>
+                    <SelectItem value="network">Network</SelectItem>
+                    <SelectItem value="range">Range</SelectItem>
+                    <SelectItem value="group">Group</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              {selectedObject.type === 'host' && (
+                <div className="space-y-2">
+                  <Label htmlFor="net-ip">IP-Adresse</Label>
+                  <Input
+                    id="net-ip"
+                    value={selectedObject.ipAddress || ''}
+                    onChange={(e) => setSelectedObject({ ...selectedObject, ipAddress: e.target.value })}
+                    placeholder="192.168.1.1"
+                  />
+                </div>
+              )}
+              
+              {selectedObject.type === 'network' && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="net-ip-net">IP-Adresse</Label>
+                    <Input
+                      id="net-ip-net"
+                      value={selectedObject.ipAddress || ''}
+                      onChange={(e) => setSelectedObject({ ...selectedObject, ipAddress: e.target.value })}
+                      placeholder="192.168.1.0"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="net-mask">Subnetzmaske</Label>
+                    <Input
+                      id="net-mask"
+                      value={selectedObject.netmask || ''}
+                      onChange={(e) => setSelectedObject({ ...selectedObject, netmask: e.target.value })}
+                      placeholder="255.255.255.0 oder /24"
+                    />
+                  </div>
+                </div>
+              )}
+              
+              {selectedObject.type === 'range' && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="net-start">Start-IP</Label>
+                    <Input
+                      id="net-start"
+                      value={selectedObject.startIp || ''}
+                      onChange={(e) => setSelectedObject({ ...selectedObject, startIp: e.target.value })}
+                      placeholder="192.168.1.1"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="net-end">End-IP</Label>
+                    <Input
+                      id="net-end"
+                      value={selectedObject.endIp || ''}
+                      onChange={(e) => setSelectedObject({ ...selectedObject, endIp: e.target.value })}
+                      placeholder="192.168.1.254"
+                    />
+                  </div>
+                </div>
+              )}
+              
+              <div className="space-y-2">
+                <Label htmlFor="net-desc">Beschreibung</Label>
+                <Textarea
+                  id="net-desc"
+                  value={selectedObject.description || ''}
+                  onChange={(e) => setSelectedObject({ ...selectedObject, description: e.target.value })}
+                  rows={3}
+                />
+              </div>
+              
+              <div className="flex justify-end gap-2 pt-4">
+                <Button variant="outline" onClick={() => setIsObjectDialogOpen(false)}>
+                  Abbrechen
+                </Button>
+                <Button onClick={() => handleSaveNetworkObject(selectedObject)}>
+                  Speichern
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Service Object Edit Dialog */}
+      <Dialog open={isServiceDialogOpen} onOpenChange={setIsServiceDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Service Object bearbeiten</DialogTitle>
+            <DialogDescription>
+              Passen Sie die Eigenschaften des Service Objects an
+            </DialogDescription>
+          </DialogHeader>
+          
+          {selectedService && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="svc-name">Name</Label>
+                <Input
+                  id="svc-name"
+                  value={selectedService.name}
+                  onChange={(e) => setSelectedService({ ...selectedService, name: e.target.value })}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="svc-proto">Protokoll</Label>
+                <Select 
+                  value={selectedService.protocol} 
+                  onValueChange={(value: any) => setSelectedService({ ...selectedService, protocol: value })}
+                >
+                  <SelectTrigger id="svc-proto">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-background z-50">
+                    <SelectItem value="tcp">TCP</SelectItem>
+                    <SelectItem value="udp">UDP</SelectItem>
+                    <SelectItem value="icmp">ICMP</SelectItem>
+                    <SelectItem value="any">Any</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="svc-src">Source Port</Label>
+                  <Input
+                    id="svc-src"
+                    value={selectedService.sourcePort || ''}
+                    onChange={(e) => setSelectedService({ ...selectedService, sourcePort: e.target.value })}
+                    placeholder="any, 1024, 1024-65535"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="svc-dest">Destination Port</Label>
+                  <Input
+                    id="svc-dest"
+                    value={selectedService.destPort || ''}
+                    onChange={(e) => setSelectedService({ ...selectedService, destPort: e.target.value })}
+                    placeholder="80, 443, 8000-9000"
+                  />
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="svc-desc">Beschreibung</Label>
+                <Textarea
+                  id="svc-desc"
+                  value={selectedService.description || ''}
+                  onChange={(e) => setSelectedService({ ...selectedService, description: e.target.value })}
+                  rows={3}
+                />
+              </div>
+              
+              <div className="flex justify-end gap-2 pt-4">
+                <Button variant="outline" onClick={() => setIsServiceDialogOpen(false)}>
+                  Abbrechen
+                </Button>
+                <Button onClick={() => handleSaveServiceObject(selectedService)}>
+                  Speichern
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Access Rule Edit Dialog */}
+      <Dialog open={isRuleDialogOpen} onOpenChange={setIsRuleDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Access Rule bearbeiten</DialogTitle>
+            <DialogDescription>
+              Passen Sie die Eigenschaften der Access Rule an
+            </DialogDescription>
+          </DialogHeader>
+          
+          {selectedRule && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="rule-name">Regelname</Label>
+                  <Input
+                    id="rule-name"
+                    value={selectedRule.name}
+                    onChange={(e) => setSelectedRule({ ...selectedRule, name: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="rule-pos">Position</Label>
+                  <Input
+                    id="rule-pos"
+                    type="number"
+                    value={selectedRule.position}
+                    onChange={(e) => setSelectedRule({ ...selectedRule, position: parseInt(e.target.value) || 0 })}
+                  />
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="rule-src">Quellen (kommagetrennt)</Label>
+                <Input
+                  id="rule-src"
+                  value={selectedRule.source.join(', ')}
+                  onChange={(e) => setSelectedRule({ 
+                    ...selectedRule, 
+                    source: e.target.value.split(',').map(s => s.trim()).filter(s => s)
+                  })}
+                  placeholder="any, 192.168.1.0/24, object-name"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="rule-dest">Ziele (kommagetrennt)</Label>
+                <Input
+                  id="rule-dest"
+                  value={selectedRule.destination.join(', ')}
+                  onChange={(e) => setSelectedRule({ 
+                    ...selectedRule, 
+                    destination: e.target.value.split(',').map(s => s.trim()).filter(s => s)
+                  })}
+                  placeholder="any, 10.0.0.0/8, object-name"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="rule-svc">Services (kommagetrennt)</Label>
+                <Input
+                  id="rule-svc"
+                  value={selectedRule.services.join(', ')}
+                  onChange={(e) => setSelectedRule({ 
+                    ...selectedRule, 
+                    services: e.target.value.split(',').map(s => s.trim()).filter(s => s)
+                  })}
+                  placeholder="any, tcp/80, udp/53, service-name"
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="rule-action">Aktion</Label>
+                  <Select 
+                    value={selectedRule.action} 
+                    onValueChange={(value: any) => setSelectedRule({ ...selectedRule, action: value })}
+                  >
+                    <SelectTrigger id="rule-action">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-background z-50">
+                      <SelectItem value="permit">Permit</SelectItem>
+                      <SelectItem value="deny">Deny</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="rule-log">Logging</Label>
+                  <Input
+                    id="rule-log"
+                    value={selectedRule.logging}
+                    onChange={(e) => setSelectedRule({ ...selectedRule, logging: e.target.value })}
+                    placeholder="default, informational, debugging"
+                  />
+                </div>
+              </div>
+              
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="rule-disabled"
+                  checked={selectedRule.disabled}
+                  onCheckedChange={(checked) => setSelectedRule({ ...selectedRule, disabled: checked as boolean })}
+                />
+                <Label htmlFor="rule-disabled">Regel deaktiviert</Label>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="rule-desc">Beschreibung</Label>
+                <Textarea
+                  id="rule-desc"
+                  value={selectedRule.description || ''}
+                  onChange={(e) => setSelectedRule({ ...selectedRule, description: e.target.value })}
+                  rows={3}
+                />
+              </div>
+              
+              <div className="flex justify-end gap-2 pt-4">
+                <Button variant="outline" onClick={() => setIsRuleDialogOpen(false)}>
+                  Abbrechen
+                </Button>
+                <Button onClick={() => handleSaveRule(selectedRule)}>
+                  Speichern
+                </Button>
+              </div>
             </div>
           )}
         </DialogContent>
