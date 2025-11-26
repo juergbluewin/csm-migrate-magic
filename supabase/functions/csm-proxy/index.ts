@@ -5,8 +5,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Session-Speicher: IP -> { cookie, lastUsed }
-const sessions = new Map<string, { cookie: string; lastUsed: number }>();
+// Session-Speicher: IP -> { cookie, lastUsed, baseUrl }
+const sessions = new Map<string, { cookie: string; lastUsed: number; baseUrl?: string }>();
 
 interface ProxyRequest {
   action: 'login' | 'request' | 'logout';
@@ -111,7 +111,7 @@ serve(async (req) => {
     if (action === 'login') {
       // Wenn Session existiert und gültig, keinen neuen Login
       if (hasSession(ipAddress)) {
-        const session = sessions.get(ipAddress)!;
+        const session = sessions.get(ipAddress) as any;
         console.log(`[${requestId}] ✅ Session bereits vorhanden, kein neuer Login nötig`);
         return new Response(JSON.stringify({
           ok: true,
@@ -119,6 +119,7 @@ serve(async (req) => {
           statusText: 'OK',
           body: '<?xml version="1.0" encoding="UTF-8"?><csm:loginResponse xmlns:csm="csm"><protVersion>1.0</protVersion></csm:loginResponse>',
           headers: { 'set-cookie': [`asCookie=${session.cookie}; Path=/; HttpOnly`] },
+          baseUrl: session.baseUrl || `http://${ipAddress}:1741/nbi`,
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           status: 200,
@@ -200,7 +201,7 @@ serve(async (req) => {
                 if (match) cookieParts.push(`${match[1]}=${match[2]}`);
               }
               const mergedCookie = cookieParts.join('; ');
-              sessions.set(ipAddress, { cookie: mergedCookie, lastUsed: Date.now() });
+              sessions.set(ipAddress, { cookie: mergedCookie, lastUsed: Date.now(), baseUrl });
             }
             
             console.log(`[${requestId}] ✅ CSM Login successful via ${loginUrl}`);
@@ -210,6 +211,7 @@ serve(async (req) => {
               statusText: response.statusText,
               body: responseText,
               headers: headers,
+              baseUrl: baseUrl, // Return successful baseUrl to client
             }), {
               headers: { ...corsHeaders, 'Content-Type': 'application/json' },
               status: 200,
@@ -248,9 +250,12 @@ serve(async (req) => {
     }
 
     if (action === 'request' && endpoint) {
-      const protocol = verifyTls ? 'https' : 'http';
-      const port = verifyTls ? '' : ':1741';
-      const baseUrl = `${protocol}://${ipAddress}${port}/nbi`;
+      // Get session to retrieve baseUrl
+      const session = sessions.get(ipAddress);
+      const baseUrl = session?.baseUrl || (verifyTls 
+        ? `https://${ipAddress}/nbi` 
+        : `http://${ipAddress}:1741/nbi`);
+      
       const fullUrl = endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint}`;
       
       console.log(`[${requestId}] 📤 CSM API Request to ${fullUrl}`);

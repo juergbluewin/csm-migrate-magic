@@ -98,18 +98,16 @@ export class CSMClient {
         throw new Error(`CSM Login fehlgeschlagen (HTTP ${statusCode})\n\n${message}`);
       }
       
-      // Store session with sessionId from proxy
-      const sessionId = result.sessionId;
-      if (!sessionId) {
-        throw new Error('No sessionId returned from proxy');
-      }
+      // Store session with baseUrl from successful login attempt
+      const sessionId = result.sessionId || crypto.randomUUID();
+      const baseUrl = result.baseUrl || `http://${ipAddress}:1741/nbi`;
       
       this.session = { 
         cookie: '', 
-        baseUrl: `http://${ipAddress}:1741/nbi/v1`,
+        baseUrl: baseUrl,
         sessionId 
       };
-      console.log('✅ Login erfolgreich, sessionId:', sessionId);
+      console.log('✅ Login erfolgreich', { sessionId, baseUrl });
       return true;
       
     } catch (error) {
